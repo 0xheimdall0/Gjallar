@@ -1,0 +1,43 @@
+import os
+from dataclasses import dataclass
+from pathlib import Path
+from dotenv import load_dotenv
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+load_dotenv(BASE_DIR / ".env")
+
+def _env_str(name: str, default: str) -> str:
+    value = os.environ.get(name)
+    return default if value is None or value == "" else value
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    return int(raw)
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+@dataclass(frozen=True)
+class Settings:
+    database_path: Path
+    max_payload: int
+    retention_days: int
+    debug: bool
+
+def load_settings() -> Settings:
+    raw_db_path = Path(_env_str("SIGNAL_DATABASE_PATH", "data/signal.db"))
+    database_path = raw_db_path if raw_db_path.is_absolute() else BASE_DIR / raw_db_path
+    return Settings(
+        database_path=database_path,
+        max_payload=_env_int("SIGNAL_MAX_PAYLOAD_BYTES", 64 * 1024),
+        retention_days=_env_int("SIGNAL_RETENTION_DAYS", 90),
+        debug=_env_bool("SIGNAL_DEBUG", False)
+    )
+
+settings = load_settings()
