@@ -1,8 +1,9 @@
 <script>
   import { onMount } from 'svelte'
-  import { getToken, setToken, fetchEvents } from './lib/api.js'
+  import { getToken, setToken, fetchEvents, fetchHeartbeats } from './lib/api.js'
   import EventCard from './lib/EventCard.svelte';
   import { enablePush, pushSupported } from './lib/push.js'
+  import HeartbeatPanel from './lib/HeartbeatPanel.svelte';
 
   /** @typedef {import('./lib/api.js').SignalEvent} SignalEvent */
   /** @typedef {import('./lib/api.js').Severity} Severity */
@@ -25,6 +26,9 @@
 
   let pushState = $state('')
   let canPush = pushSupported()
+
+  /** @type {import('./lib/api.js').Heartbeat[]}*/
+  let heartbeats = $state([])
 
   async function turnOnPush() {
     pushState = 'Enabling...'
@@ -53,6 +57,9 @@
         limit: 25,
       })
       events = append ? [...events, ...page.events] : page.events
+      if (!append) {
+        heartbeats = await fetchHeartbeats()
+      }
       nextBefore = page.next_before
     } catch (e) {
       error = e instanceof Error ? e.message: String(e)
@@ -125,6 +132,8 @@
   {#if events.length === 0 && !loading && !error}
     <p class="empty">No events yet.</p>
   {/if}
+
+  <HeartbeatPanel {heartbeats} />
 
   {#each events as event (event.id)}
     <EventCard {event} />

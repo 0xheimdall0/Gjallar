@@ -35,3 +35,6 @@ def get_db() -> Iterator[sqlite3.Connection]:
         yield conn
     finally:
         conn.close()
+
+def parse_utc(value: str) -> datetime:
+    return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)

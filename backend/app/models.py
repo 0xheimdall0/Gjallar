@@ -40,3 +40,17 @@ class PushSubscriptionIn(BaseModel):
     auth: str = Field(min_length=1, max_length=200)
     label: str | None = Field(default=None, max_length=100)
     min_severity: Severity = "warn"
+
+class HeartbeatPing(BaseModel):
+    model_config = {"extra": "forbid"}
+    expected_interval_seconds: int | None = Field(default=None, gt=0, le=31_536_000)
+    grace_seconds: int | None = Field(default=None, ge=0, le=86_400)
+
+class HeartbeatOut(BaseModel):
+    name: str
+    source: str
+    state: str
+    expected_interval_seconds: int
+    grace_seconds: int
+    last_ping_at: str | None
+    paused: bool

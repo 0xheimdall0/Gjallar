@@ -8,13 +8,27 @@ from . import __version__
 from .auth import verify_token
 from .config import settings
 from .db import get_db, init_db, utc_now
-from .models import EventIn, EventOut, EventRead, EventPage, Severity, PushSubscriptionIn
+from .models import EventIn, EventOut, EventRead, EventPage, PushSubscriptionIn, Severity, HeartbeatPing, HeartbeatOut
 from .push import notify_event
+from .heartbeats import record_heartbeat_event, check_heartbeats
+from apscheduler.schedulers.background import BackgroundScheduler
+
+scheduler = BackgroundScheduler(daemon=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    scheduler.add_job(
+        check_heartbeats,
+        "interval",
+        seconds=60,
+        id="heartbeat-check",
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.start()
     yield
+    scheduler.shutdown(wait=False)
 
 app = FastAPI(
     title="Signal inbox",
@@ -198,3 +212,82 @@ def push_subscribe(
     )
     db.commit()
     return {"ok": True}
+
+@app.post("/api/heartbeats/{name}/ping", status_code=204)
+def heartbeat_ping(
+    name: str,
+    ping: HeartbeatPing,
+    background: BackgroundTasks,
+    source: sqlite3.Row = Depends(require_source),
+    db: sqlite3.Connection = Depends(get_db),
+) -> None:
+    now = utc_now()
+    existing = db.execute(
+        "SELECT * FROM heartbeats WHERE source_id = ? AND name = ?",
+        (source["id"], name),
+    ).fetchone()
+
+    if existing is None:
+        if ping.expected_interval_seconds is None:
+            raise HTTPException(
+                400, "First ping must include expected_interval_seconds to register the heartbeat."
+            )
+        db.execute(
+            "INSERT INTO heartbeats (source_id, name, expected_interval_seconds, grace_seconds, last_ping_at, state, created_at)"
+            " VALUES (?, ?, ?, ?, ?, 'ok', ?)",
+            (
+                source["id"],
+                name,
+                ping.expected_interval_seconds,
+                ping.grace_seconds if ping.grace_seconds is not None else 300,
+                now,
+                now,
+            )
+        )
+        db.commit()
+        return
+
+    was_down = existing["state"] == "down"
+    db.execute(
+        "UPDATE heartbeats SET"
+        "   last_ping_at = ?,"
+        "   state = 'ok',"
+        "   alerted_at = NULL,"
+        "   expected_interval_seconds = COALESCE(?, expected_interval_seconds),"
+        "   grace_seconds = COALESCE(?, grace_seconds)"
+        " WHERE id = ?",
+        (now, ping.expected_interval_seconds, ping.grace_seconds, existing["id"]),
+    )
+    db.commit()
+
+    if was_down:
+        background.add_task(
+            record_heartbeat_event,
+            source["id"],
+            source["name"],
+            f"{name} is reporting again",
+            "info",
+        )
+
+@app.get("/api/heartbeats", response_model=list[HeartbeatOut])
+def list_heartbeats(
+    _: None = Depends(require_admin),
+    db: sqlite3.Connection = Depends(get_db),
+) -> list[HeartbeatOut]:
+    rows = db.execute(
+        "SELECT h.*, s.name AS source_name FROM heartbeats h"
+        " JOIN sources s ON s.id = h.source_id ORDER BY h.state = 'ok', s.name, h.name"
+    ).fetchall()
+
+    return [
+        HeartbeatOut(
+            name=r["name"],
+            source=r["source_name"],
+            state=r["state"],
+            expected_interval_seconds=r["expected_interval_seconds"],
+            grace_seconds=r["grace_seconds"],
+            last_ping_at=r["last_ping_at"],
+            paused=bool(r["paused"]),
+        )
+        for r in rows
+    ]
