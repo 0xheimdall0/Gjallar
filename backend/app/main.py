@@ -1,13 +1,14 @@
 import json
 import sqlite3
+import hmac
 from contextlib import asynccontextmanager
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, status, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from . import __version__
 from .auth import verify_token
 from .config import settings
 from .db import get_db, init_db, utc_now
-from .models import EventIn, EventOut
+from .models import EventIn, EventOut, EventRead, EventPage, Severity
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -74,3 +75,83 @@ def create_event(
     )
     db.commit()
     return EventOut(id=cursor.lastrowid, received_at=received_at)
+
+def require_admin(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> None:
+    if settings.admin_token is None:
+        raise HTTPException(503, "Admin token not configured on the server.")
+    if credentials is None:
+        raise HTTPException(401, "Missing token.", headers={"WWW-Authenticate": "Bearer"})
+    if not hmac.compare_digest(credentials.credentials, settings.admin_token):
+        raise HTTPException(401, "Credentials don't match.")
+
+@app.get("/api/events", response_model=EventPage)
+def list_events(
+    _: None = Depends(require_admin),
+    db: sqlite3.Connection = Depends(get_db),
+    limit: int = Query(default=50, ge=1, le=200),
+    before: int | None = Query(default=None, description="Return events with id < this."),
+    source: str | None = None,
+    severity: Severity | None = None,
+    tag: str | None = None,
+    q: str | None = Query(default=None, max_length=200),
+    unread: bool = False
+) -> EventPage:
+    where: list[str] = []
+    params: list = []
+
+    if before is not None:
+        where.append("e.id < ?")
+        params.append(before)
+
+    if source is not None:
+        where.append("s.name = ?")
+        params.append(source)
+
+    if severity is not None:
+        where.append("e.severity = ?")
+        params.append(severity)
+
+    if tag is not None:
+        where.append("EXISTS (SELECT 1 FROM json_each(e.tags) WHERE json_each.value = ?)")
+        params.append(tag)
+
+    if q is not None:
+        where.append("(e.title LIKE ? OR e.message LIKE ?)")
+        params.extend([f"%{q}%", f"%{q}%"])
+
+    if unread:
+        where.append("e.read_at IS NULL")
+
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+
+    rows = db.execute(
+        f"""
+        SELECT e.*, s.name AS source_name
+        FROM events e
+        JOIN sources s ON s.id = e.source_id
+        {where_sql}
+        ORDER BY e.id DESC
+        LIMIT ?
+        """,
+        (*params, limit)
+    ).fetchall()
+
+    events = [
+        EventRead(
+            id=r["id"],
+            source=r["source_name"],
+            title=r["title"],
+            message=r["message"],
+            severity=r["severity"],
+            tags=json.loads(r["tags"]),
+            metadata=json.loads(r["metadata"]) if r["metadata"] else None,
+            link=r["link"],
+            received_at=r["received_at"],
+            read_at=r["read_at"], 
+        )
+        for r in rows
+    ]
+
+    next_before = events[-1].id if len(events) == limit else None
+
+    return EventPage(events=events, next_before=next_before)

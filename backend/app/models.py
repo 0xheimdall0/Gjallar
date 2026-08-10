@@ -16,3 +16,18 @@ class EventIn(BaseModel):
 class EventOut(BaseModel):
     id: int
     received_at: str
+
+class EventRead(BaseModel):
+    id: int
+    source: str
+    title: str
+    message: str | None
+    tags: list[str]
+    metadata: str | None
+    link: str | None
+    received_at: str 
+    read_at: str | None
+
+class EventPage(BaseModel):
+    events: list[EventRead]
+    next_before: int | None
