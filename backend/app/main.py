@@ -1,19 +1,44 @@
-import json
-import sqlite3
 import hmac
+import json
+import logging
+import sqlite3
 from contextlib import asynccontextmanager
-from fastapi import Depends, FastAPI, HTTPException, status, Query, BackgroundTasks
+
+from apscheduler.schedulers.background import BackgroundScheduler
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, status
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from starlette.requests import Request
+
 from . import __version__
 from .auth import verify_token
 from .config import settings
 from .db import get_db, init_db, utc_now
-from .models import EventIn, EventOut, EventRead, EventPage, PushSubscriptionIn, Severity, HeartbeatPing, HeartbeatOut
+from .heartbeats import check_heartbeats, record_heartbeat_event
+from .models import (
+    EventIn,
+    EventOut,
+    EventPage,
+    EventRead,
+    HeartbeatOut,
+    HeartbeatPing,
+    PushSubscriptionIn,
+    Severity,
+)
 from .push import notify_event
-from .heartbeats import record_heartbeat_event, check_heartbeats
-from apscheduler.schedulers.background import BackgroundScheduler
+from .ratelimit import enforce_rate_limit
+from .retention import purge_old_events
 
 scheduler = BackgroundScheduler(daemon=True)
+
+logging.basicConfig(
+    level=logging.DEBUG if settings.debug else logging.INFO,
+    format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+)
+for noisy in ("asyncio", "httpx", "httpcore", "apscheduler.executors.default"):
+    logging.getLogger(noisy).setLevel(logging.WARNING)
+
+logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -23,6 +48,14 @@ async def lifespan(app: FastAPI):
         "interval",
         seconds=60,
         id="heartbeat-check",
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        purge_old_events,
+        "interval",
+        hours=24,
+        id="retention-purge",
         max_instances=1,
         coalesce=True,
     )
@@ -52,11 +85,17 @@ def require_source(
     )
 
     if credentials is None:
+        logger.info("ingest rejected: no bearer token")
         raise unauthorized
 
     source = verify_token(db, credentials.credentials)
     if source is None:
+        logger.warning(
+            "ingest rejected: bad token, prefix=%s",
+            credentials.credentials[:12],
+        )
         raise unauthorized
+
     return source
 
 @app.get("/api/health")
@@ -74,6 +113,7 @@ def create_event(
     source: sqlite3.Row = Depends(require_source),
     db: sqlite3.Connection = Depends(get_db)
 ) -> EventOut:
+    enforce_rate_limit(source["id"])
     received_at = utc_now()
     cursor = db.execute(
         "INSERT INTO events (source_id, title, message, severity, tags, metadata, link, received_at)"
@@ -108,6 +148,7 @@ def require_admin(credentials: HTTPAuthorizationCredentials | None = Depends(_be
     if credentials is None:
         raise HTTPException(401, "Missing token.", headers={"WWW-Authenticate": "Bearer"})
     if not hmac.compare_digest(credentials.credentials, settings.admin_token):
+        logger.warning("admin auth rejected")
         raise HTTPException(401, "Credentials don't match.")
 
 @app.get("/api/events", response_model=EventPage)
@@ -291,3 +332,36 @@ def list_heartbeats(
         )
         for r in rows
     ]
+
+@app.middleware("http")
+async def limit_payload_size(request: Request, call_next):
+    if request.method in {"POST", "PUT", "PATCH"}:
+        declared = request.headers.get("content-length")
+        if declared is not None and int(declared) > settings.max_payload:
+            return JSONResponse(
+                {"detail": "Payload too long."},
+                status_code=413,
+            )
+    return await call_next(request)
+
+CSP_PRODUCTION = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "connect-src 'self'; "
+    "frame-ancestors 'none'; "
+    "base-uri 'none'; "
+    "object-src 'none'"
+)
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    if not request.url.path.startswith("/docs"):
+        response.headers["Content-Security-Policy"] = CSP_PRODUCTION
+
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
+    return response

@@ -1,6 +1,9 @@
 import json
+import logging
 import sqlite3
+
 from pywebpush import WebPushException, webpush
+
 from .config import settings
 from .db import connect, utc_now
 
@@ -9,6 +12,8 @@ SEVERITY_ORDER = {"debug": 0, "info": 1, "warn": 2, "error": 3, "critical": 4}
 MAX_FAILURES = 5
 
 BODY_PREVIEW_CHARS = 120
+
+logger = logging.getLogger(__name__)
 
 def _send(conn: sqlite3.Connection, sub: sqlite3.Row, payload: dict) -> None:
     try:
@@ -22,8 +27,18 @@ def _send(conn: sqlite3.Connection, sub: sqlite3.Row, payload: dict) -> None:
             vapid_claims={"sub": settings.vapid_subject},
             ttl=3600,
         )
+        logger.info("push delivered to subscription %s", sub["id"])
     except WebPushException as exc:
         status = exc.response.status_code if exc.response is not None else None
+
+        logger.warning(
+            "push failed for subscription %s (%s): status=%s body=%s",
+            sub["id"],
+            sub["label"] or 'unlabelled', 
+            status,
+            exc.response.text[:200] if exc.response is not None else "no response",
+        )
+
         if status in (404, 410):
             conn.execute("DELETE FROM push_subscriptions WHERE id = ?", (sub["id"],))
         else:

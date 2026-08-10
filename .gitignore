@@ -239,3 +239,6 @@ frontend/package-lock.json
 
 # Node
 node_modules/
+
+#Scripts
+scripts/

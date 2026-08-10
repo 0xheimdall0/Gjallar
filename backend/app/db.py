@@ -1,7 +1,8 @@
 import sqlite3
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator
+
 from .config import settings
 
 SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"

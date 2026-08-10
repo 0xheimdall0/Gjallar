@@ -1,8 +1,11 @@
 import json
-import sqlite3
+import logging
 from datetime import datetime, timezone
-from .db import connect, utc_now, parse_utc
+
+from .db import connect, parse_utc, utc_now
 from .push import notify_event
+
+logger = logging.getLogger(__name__)
 
 def record_heartbeat_event(
     source_id: int,
@@ -20,6 +23,7 @@ def record_heartbeat_event(
             (source_id, title, message, severity, json.dumps(["heartbeat"]), received_at)
         )
         conn.commit()
+        logger.info("heartbeat event filed: %s [%s]", title, severity)
         event_id = cursor.lastrowid
     finally:
         conn.close()
@@ -54,11 +58,16 @@ def check_heartbeats() -> None:
                 new_state = "ok"
             elif interval < elapsed <= deadline:
                 new_state = "late"
-            elif elapsed > deadline:
+            else:
                 new_state = "down"
 
             if new_state == hb["state"]:
                 continue
+
+            logger.info(
+                "heartbeat %s/%s: %s -> %s (%.0fs since last ping)",
+                hb["source_name"], hb["name"], hb["state"], new_state, elapsed,
+            )
 
             conn.execute(
                 "UPDATE heartbeats SET state = ? WHERE id = ?",

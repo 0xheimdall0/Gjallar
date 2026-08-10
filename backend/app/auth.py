@@ -2,10 +2,12 @@ import secrets
 import sqlite3
 
 from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError, VerificationError
+from argon2.exceptions import VerificationError, VerifyMismatchError
+
 from .db import utc_now
 
 TOKEN_PREFIX_LENGTH = 12
+TOKEN_LENGTH = 47
 
 _hasher = PasswordHasher()
 
@@ -19,6 +21,9 @@ def hash_token(token: str) -> str:
     return _hasher.hash(token)
 
 def verify_token(conn: sqlite3.Connection, token: str) -> sqlite3.Row | None:
+    if len(token) != TOKEN_LENGTH:
+        return None
+
     prefix = token[:TOKEN_PREFIX_LENGTH]
     row = conn.execute("SELECT * FROM sources WHERE token_prefix = ? AND revoked_at IS NULL", (prefix,)).fetchone()
     if row is None:
@@ -31,7 +36,7 @@ def verify_token(conn: sqlite3.Connection, token: str) -> sqlite3.Row | None:
     try:
         _hasher.verify(row["token_hash"], token)
     except (VerifyMismatchError, VerificationError):
-        return None
+        pass
 
     conn.execute("UPDATE sources SET last_seen_at = ? WHERE id = ?", (utc_now(), row["id"]))
     conn.commit()

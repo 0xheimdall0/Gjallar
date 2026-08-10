@@ -30,12 +30,13 @@ Named after Gjallarhorn — the horn Heimdall sounds when something is coming.
 
 | Done | In progress / planned |
 |---|---|
-| Database schema — sources, events, heartbeats, subscriptions | Heartbeats and silence detection |
-| Source token authentication (Argon2, prefix lookup, revocation) | Security hardening pass |
-| Event ingest endpoint with schema validation | Docker packaging and deployment |
+| Database schema — sources, events, heartbeats, subscriptions | Security hardening pass |
+| Source token authentication (Argon2, prefix lookup, revocation) | Docker packaging and deployment |
+| Event ingest endpoint with schema validation | |
 | Read API — filters, tag search, full-text search, pagination | |
 | Svelte timeline UI | |
 | Installable PWA with Web Push notifications | |
+| Heartbeats — ping endpoint, silence checker, alerting | |
 
 ## Features
 
@@ -45,7 +46,7 @@ Named after Gjallarhorn — the horn Heimdall sounds when something is coming.
 - **Cursor pagination** — pages are requested by last-seen id, so events arriving mid-scroll are never silently skipped.
 - **Installable PWA** — add it to your phone's home screen or your desktop; it opens in its own window and works offline for anything already loaded.
 - **Web Push notifications** — events reach you with the app closed. Each device sets its own severity floor, so the phone can stay quiet while the desktop shows everything, and `critical` alerts stay on screen until acknowledged.
-- **Heartbeats (planned)** — declare that a source must check in every *N* seconds with a grace period; silence past that becomes an alert.
+- **Heartbeats** — declare that a source must check in every *N* seconds with a grace period. A checker runs every minute looking for pings that didn't happen; crossing the grace boundary files a `critical` event, which then flows through the timeline and notifications like any other. Recovery is reported too, and one outage produces exactly one alert.
 - **Two credential types**
   - *Source tokens* — write-only, one per machine or script, individually revocable.
   - *Admin token* — read-only, used by the UI.
@@ -138,6 +139,12 @@ browser only ever sees one origin and no CORS configuration is required.
 | `GET` | `/api/events` | admin token | timeline, filters, pagination |
 | `GET` | `/api/push/key` | admin token | VAPID public key for subscribing |
 | `POST` | `/api/push/subscribe` | admin token | register this device for notifications |
+| `POST` | `/api/heartbeats/{name}/ping` | source token | check in; registers the heartbeat on first ping |
+| `GET` | `/api/heartbeats` | admin token | all heartbeats and their current state |
+
+A heartbeat's first ping must carry `expected_interval_seconds` to register it;
+`grace_seconds` is optional and defaults to 300. Later pings can send an empty
+body, or supply new values to change the schedule.
 
 `POST /api/events` accepts `title` (required), `message`, `severity`
 (`debug` / `info` / `warn` / `error` / `critical`), `tags`, `metadata` and `link`.
@@ -214,6 +221,7 @@ backend/
     schema.sql    the whole data model, idempotent DDL
     auth.py       token generation and verification
     push.py       Web Push delivery and subscription pruning
+    heartbeats.py silence checker and heartbeat alerting
     models.py     request/response schemas
     main.py       FastAPI application and routes
   manage.py       admin CLI
@@ -226,6 +234,7 @@ frontend/
       api.js      the only module that talks to the backend
       push.js     permission prompt and subscription registration
       EventCard.svelte
+      HeartbeatPanel.svelte
 docs/             notes and write-ups
 ```
 
