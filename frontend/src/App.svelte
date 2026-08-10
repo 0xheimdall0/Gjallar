@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { getToken, setToken, fetchEvents } from './lib/api.js'
   import EventCard from './lib/EventCard.svelte';
+  import { enablePush, pushSupported } from './lib/push.js'
 
   /** @typedef {import('./lib/api.js').SignalEvent} SignalEvent */
   /** @typedef {import('./lib/api.js').Severity} Severity */
@@ -21,6 +22,19 @@
   let severity = $state('')
   let q = $state('')
   let unread = $state(false)
+
+  let pushState = $state('')
+  let canPush = pushSupported()
+
+  async function turnOnPush() {
+    pushState = 'Enabling...'
+    try {
+      await enablePush('warn', 'desktop')
+      pushState = 'Notifications enabled.'
+    } catch (e) {
+      pushState = e instanceof Error ? e.message : String(e)
+    }
+  }
 
   /**
    * @param {object} [opts]
@@ -69,6 +83,13 @@
     />
     <button onclick={saveToken}>Save</button>
   </section>
+
+  {#if canPush}
+    <section class="push">
+      <button onclick={turnOnPush}>Enable notifications</button>
+      {#if pushState}<span class="push-state">{pushState}</span>{/if}
+    </section>
+  {/if}
 
   <section class="filters">
     <select bind:value={severity} onchange={() => load()}>

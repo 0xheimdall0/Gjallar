@@ -217,3 +217,25 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ---------------------------------------------------------------- Gjallar ---
+
+# SQLite database and its write-ahead-log sidecars
+backend/data/
+*.db
+*.db-wal
+*.db-shm
+
+# Local configuration and secrets (admin token, VAPID private key).
+# .env.example is documentation and must stay committed.
+.env
+!.env.example
+
+# Build output
+frontend/dist/
+frontend/dev-dist/
+frontend/package.json
+frontend/package-lock.json
+
+# Node
+node_modules/

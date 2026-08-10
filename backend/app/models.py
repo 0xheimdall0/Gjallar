@@ -23,7 +23,7 @@ class EventRead(BaseModel):
     title: str
     message: str | None
     tags: list[str]
-    metadata: str | None
+    metadata: dict | None
     link: str | None
     received_at: str 
     read_at: str | None

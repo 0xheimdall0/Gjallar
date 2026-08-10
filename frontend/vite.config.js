@@ -8,6 +8,9 @@ export default defineConfig({
     svelte(),
     VitePWA({
       registerType: 'autoUpdate',
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.js',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
         name: 'Gjallar',
@@ -24,15 +27,20 @@ export default defineConfig({
           { src: 'pwa-maskable-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable'}
         ]
       },
-      workbox: {
-        navigateFallbackDenylist: [/^\/api/]
+      injectManifest: {
+        globPatterns: ['**/*.{js,css,html,svg,png}'],
       },
-      devOptions: { enabled: true }
-    })
+      devOptions: { enabled: true, type: "module" },
+    }),
   ],
   server: {
     proxy: {
       '/api': 'http://127.0.0.1:8000',
+    },
+  },
+  preview: {
+    proxy: {
+      '/api': "http://127.0.0.1:8000",
     },
   },
 })

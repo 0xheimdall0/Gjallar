@@ -56,6 +56,7 @@ def health(db: sqlite3.Connection = Depends(get_db)) -> dict:
 @app.post("/api/events", response_model=EventOut, status_code=201)
 def create_event(
     event: EventIn,
+    background: BackgroundTasks,
     source: sqlite3.Row = Depends(require_source),
     db: sqlite3.Connection = Depends(get_db)
 ) -> EventOut:
@@ -75,13 +76,13 @@ def create_event(
         )
     )
     db.commit()
-    BackgroundTasks.add_task(
+    background.add_task(
         notify_event,
         {
             "id": cursor.lastrowid,
             "title": event.title,
             "message": event.message,
-            "severity": event.security,
+            "severity": event.severity,
             "source": source["name"],
         }
     )
@@ -173,7 +174,7 @@ def push_key(_: None = Depends(require_admin)) -> dict:
         raise HTTPException(503, "Push is not configured on the server.")
     return {"public_key": settings.vapid_public_key}
 
-@app.post("api/push/subscribe", status_code=201)
+@app.post("/api/push/subscribe", status_code=201)
 def push_subscribe(
     subscription: PushSubscriptionIn,
     _: None = Depends(require_admin),

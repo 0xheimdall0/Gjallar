@@ -30,11 +30,12 @@ Named after Gjallarhorn — the horn Heimdall sounds when something is coming.
 
 | Done | In progress / planned |
 |---|---|
-| Database schema — sources, events, heartbeats, subscriptions | Installable PWA with Web Push |
-| Source token authentication (Argon2, prefix lookup, revocation) | Heartbeats and silence detection |
-| Event ingest endpoint with schema validation | Security hardening pass |
-| Read API — filters, tag search, full-text search, pagination | Docker packaging and deployment |
+| Database schema — sources, events, heartbeats, subscriptions | Heartbeats and silence detection |
+| Source token authentication (Argon2, prefix lookup, revocation) | Security hardening pass |
+| Event ingest endpoint with schema validation | Docker packaging and deployment |
+| Read API — filters, tag search, full-text search, pagination | |
 | Svelte timeline UI | |
+| Installable PWA with Web Push notifications | |
 
 ## Features
 
@@ -42,8 +43,9 @@ Named after Gjallarhorn — the horn Heimdall sounds when something is coming.
 - **Timeline** — every event from every machine in one place, newest first, with severity, source, tags and free-text message.
 - **Filtering & search** — by source, by severity, by tag, by full-text match on title or message, or unread only.
 - **Cursor pagination** — pages are requested by last-seen id, so events arriving mid-scroll are never silently skipped.
+- **Installable PWA** — add it to your phone's home screen or your desktop; it opens in its own window and works offline for anything already loaded.
+- **Web Push notifications** — events reach you with the app closed. Each device sets its own severity floor, so the phone can stay quiet while the desktop shows everything, and `critical` alerts stay on screen until acknowledged.
 - **Heartbeats (planned)** — declare that a source must check in every *N* seconds with a grace period; silence past that becomes an alert.
-- **Web Push (planned)** — installable to your phone's home screen, with per-device severity thresholds so the phone stays quieter than the desktop.
 - **Two credential types**
   - *Source tokens* — write-only, one per machine or script, individually revocable.
   - *Admin token* — read-only, used by the UI.
@@ -59,6 +61,8 @@ Named after Gjallarhorn — the horn Heimdall sounds when something is coming.
 - **Every query uses bound parameters.** Dynamic `WHERE` clauses are assembled only from string literals in the source; user values always go through placeholders.
 - **Output is escaped by default.** Event text is attacker-controlled and rendered in a browser; Svelte interpolation escapes it, and `{@html}` is never used.
 - **Tokens are shown once and cannot be recovered.** Lose one, revoke it and issue another.
+- **Push payloads are encrypted for the device.** Web Push encrypts the body with keys the browser generated, so the push service relays ciphertext it cannot read. It still sees timing, size and endpoint, so payloads carry a short preview rather than full event text.
+- **Dead push endpoints are pruned.** A `404`/`410` from the push service deletes the subscription; repeated other failures retire it after five attempts.
 
 Full threat model, decisions taken and known open weaknesses:
 [docs/security-notes.md](docs/security-notes.md).
@@ -94,6 +98,19 @@ Generate the admin token the UI will use:
 python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
+Generate the VAPID key pair that signs push messages, and put both lines plus a
+contact address into `.env`:
+
+```bash
+python generate_vapid.py
+# SIGNAL_VAPID_PRIVATE_KEY=...
+# SIGNAL_VAPID_PUBLIC_KEY=...
+# SIGNAL_VAPID_SUBJECT=mailto:you@example.com
+```
+
+Run it once. Regenerating the pair invalidates every existing subscription,
+because browsers bind a subscription to the public key it was created with.
+
 Issue a token to a machine (printed once, unrecoverable):
 
 ```bash
@@ -119,6 +136,8 @@ browser only ever sees one origin and no CORS configuration is required.
 | `GET` | `/api/health` | none | liveness check; touches the database |
 | `POST` | `/api/events` | source token | file an event |
 | `GET` | `/api/events` | admin token | timeline, filters, pagination |
+| `GET` | `/api/push/key` | admin token | VAPID public key for subscribing |
+| `POST` | `/api/push/subscribe` | admin token | register this device for notifications |
 
 `POST /api/events` accepts `title` (required), `message`, `severity`
 (`debug` / `info` / `warn` / `error` / `critical`), `tags`, `metadata` and `link`.
@@ -137,7 +156,35 @@ and `unread`.
 2. Paste the admin token into the field at the top and save it.
 3. Issue a source token per machine with `manage.py create-source`.
 4. Add one `curl` line to any script you want to hear from.
-5. Filter by severity, source or tag when something needs finding.
+5. Click **Enable notifications** to register the device for push.
+6. Filter by severity, source or tag when something needs finding.
+
+## Troubleshooting
+
+**Notifications never arrive.** Check, in this order:
+
+1. **Operating-system focus modes.** Windows Focus Assist / Do Not Disturb
+   suppresses notifications silently. The push service still returns `201`,
+   because `201` means *accepted for delivery*, not *displayed*. This is the
+   single most likely cause and the easiest to overlook.
+2. **The push service is reachable.** Push is the one part of Gjallar you cannot
+   self-host: the message travels via Google (Chrome), Mozilla (Firefox) or
+   Apple (Safari). Some corporate and campus networks block those endpoints, and
+   the failure surfaces as `Registration failed - push service error` at
+   subscribe time. Try a different browser or network to confirm.
+3. **The subscription is current.** Unregistering the service worker or clearing
+   site data invalidates the subscription; re-enable notifications to create a
+   new one. Stale rows are pruned when the push service reports them gone.
+
+**Push works on desktop but not on the phone.** Notifications require a secure
+context. `localhost` counts; a LAN IP over plain HTTP does not. Serve the app
+over HTTPS. On iOS, the app must additionally be installed to the home screen —
+Safari does not deliver push to a normal tab.
+
+**Code changes to the service worker don't take effect.** A service worker with
+an open client is replaced only after every tab for that origin closes. During
+development, unregister it (`about:debugging` in Firefox, DevTools → Application
+in Chrome) and hard-reload.
 
 ## Architecture
 
@@ -157,14 +204,18 @@ backend/
     db.py         SQLite connections and helpers
     schema.sql    the whole data model, idempotent DDL
     auth.py       token generation and verification
+    push.py       Web Push delivery and subscription pruning
     models.py     request/response schemas
     main.py       FastAPI application and routes
   manage.py       admin CLI
+  generate_vapid.py  one-shot VAPID key generator
 frontend/
   src/
     App.svelte    timeline, filters, token entry
+    sw.js         service worker: precache, push, notification click
     lib/
       api.js      the only module that talks to the backend
+      push.js     permission prompt and subscription registration
       EventCard.svelte
 docs/             notes and write-ups
 ```

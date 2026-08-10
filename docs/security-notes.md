@@ -79,6 +79,35 @@ message containing `<script>alert(1)</script>` is displayed, not executed. The
 protection disappears the moment `{@html ...}` is used, so it is never used.
 A strict CSP is still to be added as defence in depth.
 
+### Push payloads are minimised, and the push service is untrusted
+
+Web Push cannot be self-hosted. Messages travel through a service run by the
+browser vendor — Mozilla for Firefox, Google for Chrome, Apple for Safari — so
+that third party is part of the delivery path whether I like it or not.
+
+The payload itself is encrypted with keys the browser generated at subscription
+time (`p256dh` and `auth`), so the relay carries ciphertext it cannot read. It
+does still learn metadata: which endpoint, at what time, of roughly what size.
+A steady trickle of pushes at 03:00 says "this person runs nightly backups"
+without revealing a single word of content.
+
+So payloads carry a 120-character preview rather than full event text. That also
+happens to be necessary — push services cap the encrypted payload at around
+4 KB — but the reason to prefer it is that the less that leaves the network, the
+less there is to leak.
+
+`userVisibleOnly: true` is set on every subscription. Chrome requires it, and it
+is the right default regardless: it forbids silent background pushes, so the
+server cannot wake the client without the user seeing something.
+
+### The VAPID private key is a signing credential
+
+It authenticates *this server* to push services. Leaking it lets someone send
+notifications that appear to come from Gjallar to every device subscribed to it.
+It lives in `.env`, never in the repository, and is generated once —
+regenerating invalidates every existing subscription, since browsers bind a
+subscription to the public key it was created with.
+
 ### Admin token in `localStorage` — a knowing tradeoff
 
 The admin token is a bearer credential in JavaScript-readable storage, so any
@@ -102,6 +131,26 @@ Found while building, not yet fixed. Scheduled for the hardening pass.
 | 5 | No retention or purge job | `events` grows without bound | Scheduled delete beyond `SIGNAL_RETENTION_DAYS` |
 | 6 | Search uses `LIKE '%…%'` | Cannot use an index; full scan | Acceptable at current scale; FTS5 if it matters |
 | 7 | Errors are not logged, only returned | No audit trail of failed auth attempts | Structured logging of 401s with source prefix |
+| 8 | `push._send` discards the reason for every failure | Delivery can stop working with no trace; diagnosing it required writing a separate script | Log status and body on every failure path |
+| 9 | Push failures inside a background task are invisible | An exception after the response is sent surfaces only in the server's stdout | Wrap the task, log, and record a failure count |
+| 10 | Notification delivery is unverifiable end to end | `201` from the push service means *accepted*, not *displayed* — an OS focus mode silently suppresses everything | Accept as a platform limit; document it, and rely on the timeline as the source of truth |
+
+## Incident worth recording
+
+Push appeared completely broken for about an hour. The server reported `HTTP 201`
+from Mozilla on every attempt, the subscription row existed, the service worker
+was registered and active, and no error appeared anywhere in the stack.
+
+The cause was Windows Do Not Disturb. Every layer I could observe was reporting
+success, and the notification was being discarded silently at the very last step,
+by a component outside the application entirely.
+
+That is precisely the failure mode Gjallar is built to catch, and it happened to
+Gjallar. The generalisation is worth keeping: **a success code from a delivery
+service is not evidence that a human was informed.** Any alerting design that
+treats "the API accepted it" as "the alert landed" has an untested assumption at
+its core — which is the argument for heartbeats, since silence is the only signal
+that survives when every acknowledgement lies.
 
 ## To verify before deployment
 
@@ -109,4 +158,6 @@ Found while building, not yet fixed. Scheduled for the hardening pass.
 - [ ] Admin token is not the default and not committed
 - [ ] `SIGNAL_DEBUG=false` in production, so `/docs` and `/openapi.json` are off
 - [ ] TLS terminated in front of the app; no plain-HTTP listener exposed
+- [ ] `SIGNAL_VAPID_PRIVATE_KEY` set, secret, and not the one from any example
+- [ ] Push tested from a device that is *not* on the development machine
 - [ ] `git log -p` reviewed for accidentally committed secrets

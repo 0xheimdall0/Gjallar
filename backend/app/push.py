@@ -15,7 +15,7 @@ def _send(conn: sqlite3.Connection, sub: sqlite3.Row, payload: dict) -> None:
         webpush(
             subscription_info={
                 "endpoint": sub["endpoint"],
-                keys: {"p256dh": sub["p256dh"], "auth": sub["auth"]},
+                "keys": {"p256dh": sub["p256dh"], "auth": sub["auth"]},
             },
             data=json.dumps(payload),
             vapid_private_key=settings.vapid_private_key,
@@ -25,21 +25,21 @@ def _send(conn: sqlite3.Connection, sub: sqlite3.Row, payload: dict) -> None:
     except WebPushException as exc:
         status = exc.response.status_code if exc.response is not None else None
         if status in (404, 410):
-            conn.execute("DELETE FROM push_subscriptions WHERE id = ?", (sub["id"]))
+            conn.execute("DELETE FROM push_subscriptions WHERE id = ?", (sub["id"],))
         else:
             conn.execute(
                 "UPDATE push_subscriptions SET failure_count = failure_count + 1 WHERE id = ?",
-                (sub["id"])
+                (sub["id"],)
             )
             conn.execute(
                 "DELETE FROM push_subscriptions WHERE failure_count >= ?",
-                (MAX_FAILURES)
+                (MAX_FAILURES,)
             )
         conn.commit()
         return
     conn.execute(
-        "UPDATE push_subscriptions SET last_seen_at = ?, failure_count = 0 WHERE id = ?",
-        (utc_now(), sub["id"])
+        "UPDATE push_subscriptions SET last_success_at = ?, failure_count = 0 WHERE id = ?",
+        (utc_now(), sub["id"],)
     )
     conn.commit()
 
