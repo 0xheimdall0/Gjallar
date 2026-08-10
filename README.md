@@ -168,11 +168,20 @@ and `unread`.
    because `201` means *accepted for delivery*, not *displayed*. This is the
    single most likely cause and the easiest to overlook.
 2. **The push service is reachable.** Push is the one part of Gjallar you cannot
-   self-host: the message travels via Google (Chrome), Mozilla (Firefox) or
-   Apple (Safari). Some corporate and campus networks block those endpoints, and
-   the failure surfaces as `Registration failed - push service error` at
-   subscribe time. Try a different browser or network to confirm.
-3. **The subscription is current.** Unregistering the service worker or clearing
+   self-host: the message travels via Google (Chrome and other Chromium
+   browsers), Mozilla (Firefox) or Apple (Safari). Some corporate and campus
+   networks block those endpoints, and the failure surfaces as
+   `Registration failed - push service error` at subscribe time. Try a different
+   browser or network to confirm.
+3. **Brave blocks push by default.** Brave ships with Google's push service
+   disabled as a privacy measure, so subscription fails outright. Enable it at
+   `brave://settings/privacy` → *Use Google services for push messaging*, then
+   restart the browser. Note the tradeoff this asks of the user: it opens a
+   connection to Google's infrastructure, which then sees push metadata for
+   every subscribed site. Someone self-hosting a monitoring tool to avoid third
+   parties may reasonably decline — a real limitation of Web Push, not of this
+   application.
+4. **The subscription is current.** Unregistering the service worker or clearing
    site data invalidates the subscription; re-enable notifications to create a
    new one. Stale rows are pruned when the push service reports them gone.
 
