@@ -8,6 +8,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.staticfiles import StaticFiles
 from starlette.requests import Request
 
 from . import __version__
@@ -221,7 +222,45 @@ def list_events(
 
     next_before = events[-1].id if len(events) == limit else None
 
-    return EventPage(events=events, next_before=next_before)
+    # Cheap thanks to idx_unread_events, the partial index that only covers
+    # rows where read_at IS NULL.
+    unread_count = db.execute(
+        "SELECT COUNT(*) AS n FROM events WHERE read_at IS NULL"
+    ).fetchone()["n"]
+
+    return EventPage(
+        events=events,
+        next_before=next_before,
+        unread_count=unread_count,
+    )
+
+
+@app.post("/api/events/read-all", status_code=204)
+def mark_all_events_read(
+    _: None = Depends(require_admin),
+    db: sqlite3.Connection = Depends(get_db),
+) -> None:
+    """Mark every unread event as read."""
+    db.execute("UPDATE events SET read_at = ? WHERE read_at IS NULL", (utc_now(),))
+    db.commit()
+
+
+@app.post("/api/events/{event_id}/read", status_code=204)
+def set_event_read(
+    event_id: int,
+    read: bool = True,
+    _: None = Depends(require_admin),
+    db: sqlite3.Connection = Depends(get_db),
+) -> None:
+    """Mark one event read (default) or unread (?read=false)."""
+    cursor = db.execute(
+        "UPDATE events SET read_at = ? WHERE id = ?",
+        (utc_now() if read else None, event_id),
+    )
+    db.commit()
+
+    if cursor.rowcount == 0:
+        raise HTTPException(404, "No such event")
 
 @app.get("/api/push/key")
 def push_key(_: None = Depends(require_admin)) -> dict:
@@ -365,3 +404,13 @@ async def security_headers(request: Request, call_next):
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
     return response
+
+if settings.frontend_dir is not None:
+    app.mount(
+        "/",
+        StaticFiles(directory=settings.frontend_dir, html=True),
+        name="frontend",
+    )
+    logger.info("serving frontend from %s.", settings.frontend_dir)
+else:
+    logger.info("no frontend build found: API only.")

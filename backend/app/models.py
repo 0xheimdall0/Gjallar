@@ -23,6 +23,7 @@ class EventRead(BaseModel):
     source: str
     title: str
     message: str | None
+    severity: Severity
     tags: list[str]
     metadata: dict | None
     link: str | None
@@ -32,6 +33,7 @@ class EventRead(BaseModel):
 class EventPage(BaseModel):
     events: list[EventRead]
     next_before: int | None
+    unread_count: int = 0
 
 class PushSubscriptionIn(BaseModel):
     model_config = {"extra": "forbid"}

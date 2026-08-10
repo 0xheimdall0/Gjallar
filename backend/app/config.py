@@ -34,10 +34,17 @@ class Settings:
     vapid_public_key: str | None
     vapid_private_key: str | None
     vapid_subject: str
+    frontend_dir: Path | None
 
 def load_settings() -> Settings:
     raw_db_path = Path(_env_str("SIGNAL_DATABASE_PATH", "data/signal.db"))
     database_path = raw_db_path if raw_db_path.is_absolute() else BASE_DIR / raw_db_path
+
+    raw_frontend = _env_str("SIGNAL_FRONTEND_DIR", "")
+    frontend_dir = (
+        Path(raw_frontend) if raw_frontend else BASE_DIR.parent / "frontend" / "dist"
+    )
+
     return Settings(
         database_path=database_path,
         max_payload=_env_int("SIGNAL_MAX_PAYLOAD_BYTES", 64 * 1024),
@@ -47,6 +54,7 @@ def load_settings() -> Settings:
         vapid_public_key=_env_str("SIGNAL_VAPID_PUBLIC_KEY", "") or None,
         vapid_private_key=_env_str("SIGNAL_VAPID_PRIVATE_KEY", "") or None,
         vapid_subject=_env_str("SIGNAL_VAPID_SUBJECT", "mailto:admin@localhost"),
+        frontend_dir=frontend_dir if frontend_dir.is_dir() else None,
     )
 
 settings = load_settings()

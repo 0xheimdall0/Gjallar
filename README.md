@@ -30,19 +30,21 @@ Named after Gjallarhorn — the horn Heimdall sounds when something is coming.
 
 | Done | In progress / planned |
 |---|---|
-| Database schema — sources, events, heartbeats, subscriptions | Security hardening pass |
-| Source token authentication (Argon2, prefix lookup, revocation) | Docker packaging and deployment |
+| Database schema — sources, events, heartbeats, subscriptions | Docker build (written, not yet verified) |
+| Source token authentication (Argon2, prefix lookup, revocation) | First-run setup wizard |
 | Event ingest endpoint with schema validation | |
 | Read API — filters, tag search, full-text search, pagination | |
-| Svelte timeline UI | |
+| Svelte timeline UI, read/unread tracking | |
 | Installable PWA with Web Push notifications | |
 | Heartbeats — ping endpoint, silence checker, alerting | |
+| Security hardening pass (see security notes) | |
 
 ## Features
 
 - **One-line ingest** — any script that can run `curl` can report to Gjallar. No client library, no SDK, no agent to install.
 - **Timeline** — every event from every machine in one place, newest first, with severity, source, tags and free-text message.
 - **Filtering & search** — by source, by severity, by tag, by full-text match on title or message, or unread only.
+- **Read/unread tracking** — click an event to mark it read; read entries recede and the unread count sits in the header. Deliberate rather than automatic: scrolling past an alert is not the same as having dealt with it.
 - **Cursor pagination** — pages are requested by last-seen id, so events arriving mid-scroll are never silently skipped.
 - **Installable PWA** — add it to your phone's home screen or your desktop; it opens in its own window and works offline for anything already loaded.
 - **Web Push notifications** — events reach you with the app closed. Each device sets its own severity floor, so the phone can stay quiet while the desktop shows everything, and `critical` alerts stay on screen until acknowledged.
@@ -130,6 +132,57 @@ npm run dev
 Open <http://localhost:5173>. Vite proxies `/api/*` to the backend, so the
 browser only ever sees one origin and no CORS configuration is required.
 
+## Running it for real
+
+In production there is one process: FastAPI serves the API *and* the built PWA,
+so there is no proxy and no second server.
+
+```bash
+cd frontend && npm run build      # writes frontend/dist
+cd ../backend && uvicorn app.main:app --port 8000
+```
+
+Then <http://127.0.0.1:8000> is the whole application.
+
+### With Docker
+
+> **Not yet verified.** The `Dockerfile` and `compose.yaml` are written and
+> committed, but they have not been built and run end to end — the supported
+> path today is running it directly, as above. Treat this section as intent
+> rather than instruction until this note disappears.
+
+```bash
+docker compose up --build
+```
+
+A two-stage build: Node compiles the frontend, and the runtime image copies only
+the output — so the shipped container has no Node toolchain in it. The database
+lives on a named volume, the process runs as an unprivileged user, and the port
+is bound to loopback rather than published to the network.
+
+### Reaching it from your phone
+
+Notifications require a **secure context**. `localhost` qualifies; a LAN address
+over plain HTTP does not — so a service worker won't even register. On iOS the
+app must additionally be installed to the home screen before Safari will deliver
+push at all.
+
+The simplest way to satisfy both without exposing anything publicly is
+[Tailscale](https://tailscale.com), which issues a real certificate for your
+tailnet:
+
+```bash
+tailscale serve --bg --https=443 http://127.0.0.1:8000
+tailscale serve status
+```
+
+Open the printed `https://…ts.net` URL on your phone, install it to the home
+screen, launch it from there, and enable notifications. Only devices on your
+tailnet can reach it, and the app never listens on a public interface.
+
+Use `tailscale serve --https=443 off` to stop. Do **not** use `tailscale funnel`
+for this — that publishes to the open internet.
+
 ## API
 
 | Method | Path | Auth | Purpose |
@@ -137,6 +190,8 @@ browser only ever sees one origin and no CORS configuration is required.
 | `GET` | `/api/health` | none | liveness check; touches the database |
 | `POST` | `/api/events` | source token | file an event |
 | `GET` | `/api/events` | admin token | timeline, filters, pagination |
+| `POST` | `/api/events/{id}/read` | admin token | mark one event read (`?read=false` to undo) |
+| `POST` | `/api/events/read-all` | admin token | mark every unread event read |
 | `GET` | `/api/push/key` | admin token | VAPID public key for subscribing |
 | `POST` | `/api/push/subscribe` | admin token | register this device for notifications |
 | `POST` | `/api/heartbeats/{name}/ping` | source token | check in; registers the heartbeat on first ping |
@@ -156,6 +211,9 @@ and `unread`.
 
 ### Timeline
 ![Timeline](docs/screenshot.png)
+
+### Notification on a phone, app closed
+![Push notification](docs/notification.png)
 
 ## Usage
 
