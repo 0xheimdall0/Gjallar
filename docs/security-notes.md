@@ -118,22 +118,40 @@ Accepted for now because this is a single-user self-hosted app and the XSS
 surface is small and actively defended. Recorded here rather than glossed over:
 the mitigation is escaping plus CSP, not the storage choice.
 
+## Closed in the hardening pass
+
+Each was found during development, written down when found, and fixed later —
+not discovered by an audit at the end.
+
+| # | Issue | What was done |
+|---|---|---|
+| 1 | Token length not checked before argon2 hashing | `verify_token` rejects anything that isn't exactly 47 characters before hashing. Measured: 20 requests carrying a 1 MB "token" now cost 151 ms in total, against roughly a second of argon2 work before. The token *format* is public, so an early length rejection leaks nothing. |
+| 2 | No rate limiting on ingest | Sliding-window limiter, 120 events per source per minute, returning `429` with `Retry-After`. Uses `time.monotonic()` so NTP corrections can't distort the window. |
+| 3 | `SIGNAL_MAX_PAYLOAD_BYTES` configured but never enforced | Middleware returns `413` when `Content-Length` exceeds the limit. Partial — see open item 1 below. |
+| 4 | No Content-Security-Policy | Strict CSP plus `X-Content-Type-Options`, `Referrer-Policy` and `Permissions-Policy` on every response. `/docs` is exempt because Swagger loads from a CDN, and that route only exists when `SIGNAL_DEBUG=true`. |
+| 5 | No retention or purge job | Daily scheduled delete of events older than `SIGNAL_RETENTION_DAYS`. The `received_at < ?` string comparison works because timestamps are ISO-8601, so lexicographic order is chronological order. |
+| 6 | Failures logged nowhere | Module loggers throughout. Rejected tokens log the 12-character prefix only, never the token. Push delivery logs both success and failure with the push service's status and response body. Third-party loggers are pinned to `WARNING` so the output stays readable. |
+
+A linter pass with `ruff` (including the `S` security rules) found one genuine
+bug the tests had not: a `logger.warning` in `push._send` referenced `status`
+one statement before it was assigned, so any push failure would have raised
+`UnboundLocalError` *inside the exception handler* and replaced the real error
+with a misleading one. The logging added to make failures visible would itself
+have failed. Config lives in `backend/ruff.toml`, with FastAPI's `Depends`
+markers exempted from B008 — those warnings are the linter misreading the
+framework, not a defect.
+
 ## Open weaknesses
 
-Found while building, not yet fixed. Scheduled for the hardening pass.
+Known, deliberate, and documented rather than overlooked.
 
-| # | Issue | Impact | Fix |
+| # | Issue | Impact | Fix when it matters |
 |---|---|---|---|
-| 1 | Token length is not checked before argon2 hashing | A multi-megabyte "token" burns real CPU per request — cheap DoS | Reject anything that isn't exactly the expected token length before hashing |
-| 2 | No rate limiting on ingest | One runaway script can fill the disk | Per-source rate limit and a payload size cap |
-| 3 | `SIGNAL_MAX_PAYLOAD_BYTES` is configured but not enforced | Setting exists, does nothing | Enforce in middleware |
-| 4 | No Content-Security-Policy header | XSS defence relies solely on escaping | Strict CSP, no inline scripts |
-| 5 | No retention or purge job | `events` grows without bound | Scheduled delete beyond `SIGNAL_RETENTION_DAYS` |
-| 6 | Search uses `LIKE '%…%'` | Cannot use an index; full scan | Acceptable at current scale; FTS5 if it matters |
-| 7 | Errors are not logged, only returned | No audit trail of failed auth attempts | Structured logging of 401s with source prefix |
-| 8 | `push._send` discards the reason for every failure | Delivery can stop working with no trace; diagnosing it required writing a separate script | Log status and body on every failure path |
-| 9 | Push failures inside a background task are invisible | An exception after the response is sent surfaces only in the server's stdout | Wrap the task, log, and record a failure count |
-| 10 | Notification delivery is unverifiable end to end | `201` from the push service means *accepted*, not *displayed* — an OS focus mode silently suppresses everything | Accept as a platform limit; document it, and rely on the timeline as the source of truth |
+| 1 | The payload cap trusts `Content-Length` | A chunked request sends no `Content-Length` and streams past the check | Count bytes while reading the stream |
+| 2 | Search uses `LIKE '%…%'` | Cannot use an index; full table scan | Acceptable at current scale; SQLite FTS5 if it stops being |
+| 3 | Logging is unstructured text | Fine to read, awkward to query or ship to a SIEM | JSON formatter and a `security` logger namespace |
+| 4 | The scheduler lives in the application process | Running uvicorn with more than one worker would give each its own scheduler, so one outage would produce several alerts | Single process is the documented deployment; otherwise move the job out or take a lock in the database |
+| 5 | Notification delivery is unverifiable end to end | `201` from a push service means *accepted*, not *displayed* — see the incident below | Platform limit. The timeline, not the notification, is the source of truth |
 
 ## Incident worth recording
 
@@ -157,7 +175,11 @@ that survives when every acknowledgement lies.
 - [ ] `foreign_keys = ON` is set on every connection, not just at schema load
 - [ ] Admin token is not the default and not committed
 - [ ] `SIGNAL_DEBUG=false` in production, so `/docs` and `/openapi.json` are off
-- [ ] TLS terminated in front of the app; no plain-HTTP listener exposed
+- [ ] TLS terminated in front of the app; no plain-HTTP listener exposed.
+      Until this is done, both token types cross the network in plaintext —
+      fine on localhost, unacceptable anywhere else
+- [ ] Single uvicorn process (see open item 4), or the scheduler moved out
+- [ ] `ruff check .` clean, or every remaining finding triaged in writing
 - [ ] `SIGNAL_VAPID_PRIVATE_KEY` set, secret, and not the one from any example
 - [ ] Push tested from a device that is *not* on the development machine
 - [ ] `git log -p` reviewed for accidentally committed secrets
