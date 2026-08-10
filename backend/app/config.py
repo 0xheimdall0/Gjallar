@@ -30,6 +30,9 @@ class Settings:
     retention_days: int
     debug: bool
     admin_token: str | None
+    vapid_public_key: str | None
+    vapid_private_key: str | None
+    vapid_subject: str
 
 def load_settings() -> Settings:
     raw_db_path = Path(_env_str("SIGNAL_DATABASE_PATH", "data/signal.db"))
@@ -39,7 +42,10 @@ def load_settings() -> Settings:
         max_payload=_env_int("SIGNAL_MAX_PAYLOAD_BYTES", 64 * 1024),
         retention_days=_env_int("SIGNAL_RETENTION_DAYS", 90),
         debug=_env_bool("SIGNAL_DEBUG", False),
-        admin_token=_env_str("SIGNAL_ADMIN_TOKEN", "") or None
+        admin_token=_env_str("SIGNAL_ADMIN_TOKEN", "") or None,
+        vapid_public_key=_env_str("SIGNAL_VAPID_PUBLIC_KEY", "") or None,
+        vapid_private_key=_env_str("SIGNAL_VAPID_PRIVATE_KEY", "") or None,
+        vapid_subject=_env_str("SIGNAL_VAPID_SUBJECT", "mailto:admin@localhost"),
     )
 
 settings = load_settings()

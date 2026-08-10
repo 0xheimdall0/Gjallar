@@ -2,13 +2,14 @@ import json
 import sqlite3
 import hmac
 from contextlib import asynccontextmanager
-from fastapi import Depends, FastAPI, HTTPException, status, Query
+from fastapi import Depends, FastAPI, HTTPException, status, Query, BackgroundTasks
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from . import __version__
 from .auth import verify_token
 from .config import settings
 from .db import get_db, init_db, utc_now
-from .models import EventIn, EventOut, EventRead, EventPage, Severity
+from .models import EventIn, EventOut, EventRead, EventPage, Severity, PushSubscriptionIn
+from .push import notify_event
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -74,6 +75,16 @@ def create_event(
         )
     )
     db.commit()
+    BackgroundTasks.add_task(
+        notify_event,
+        {
+            "id": cursor.lastrowid,
+            "title": event.title,
+            "message": event.message,
+            "severity": event.security,
+            "source": source["name"],
+        }
+    )
     return EventOut(id=cursor.lastrowid, received_at=received_at)
 
 def require_admin(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> None:
@@ -155,3 +166,34 @@ def list_events(
     next_before = events[-1].id if len(events) == limit else None
 
     return EventPage(events=events, next_before=next_before)
+
+@app.get("/api/push/key")
+def push_key(_: None = Depends(require_admin)) -> dict:
+    if not settings.vapid_public_key:
+        raise HTTPException(503, "Push is not configured on the server.")
+    return {"public_key": settings.vapid_public_key}
+
+@app.post("api/push/subscribe", status_code=201)
+def push_subscribe(
+    subscription: PushSubscriptionIn,
+    _: None = Depends(require_admin),
+    db: sqlite3.Connection = Depends(get_db),
+) -> dict:
+    db.execute(
+        "INSERT INTO push_subscriptions (endpoint, p256dh, auth, label, min_severity, created_at)"
+        " VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(endpoint) DO UPDATE SET"
+        "   p256dh = excluded.p256dh,"
+        "   auth = excluded.auth,"
+        "   label = excluded.label,"
+        "   min_severity = excluded.min_severity",
+        (
+            subscription.endpoint,
+            subscription.p256dh,
+            subscription.auth,
+            subscription.label,
+            subscription.min_severity,
+            utc_now(),
+        )
+    )
+    db.commit()
+    return {"ok": True}

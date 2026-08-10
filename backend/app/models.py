@@ -31,3 +31,12 @@ class EventRead(BaseModel):
 class EventPage(BaseModel):
     events: list[EventRead]
     next_before: int | None
+
+class PushSubscriptionIn(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    endpoint: str = Field(min_length=1, max_length=2000)
+    p256dh: str = Field(min_length=1, max_length=200)
+    auth: str = Field(min_length=1, max_length=200)
+    label: str | None = Field(default=None, max_length=100)
+    min_severity: Severity = "warn"
