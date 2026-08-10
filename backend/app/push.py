@@ -4,6 +4,7 @@ import sqlite3
 
 from pywebpush import WebPushException, webpush
 
+from . import config
 from .config import settings
 from .db import connect, utc_now
 
@@ -23,7 +24,7 @@ def _send(conn: sqlite3.Connection, sub: sqlite3.Row, payload: dict) -> None:
                 "keys": {"p256dh": sub["p256dh"], "auth": sub["auth"]},
             },
             data=json.dumps(payload),
-            vapid_private_key=settings.vapid_private_key,
+            vapid_private_key=config.vapid_private_key(),
             vapid_claims={"sub": settings.vapid_subject},
             ttl=3600,
         )
@@ -66,7 +67,7 @@ def _preview(message: str | None) -> str:
     return message[: BODY_PREVIEW_CHARS - 1] + "-"
 
 def notify_event(event: dict) -> None:
-    if not settings.vapid_private_key:
+    if not config.vapid_private_key():
         return
     conn = connect()
     try:

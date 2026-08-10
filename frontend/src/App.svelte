@@ -7,7 +7,9 @@
     fetchHeartbeats,
     setEventRead,
     markAllRead,
+    fetchSetupStatus,
   } from './lib/api.js'
+  import Setup from './lib/Setup.svelte'
   import { enablePush, pushSupported } from './lib/push.js'
   import EventCard from './lib/EventCard.svelte'
   import HeartbeatPanel from './lib/HeartbeatPanel.svelte'
@@ -39,7 +41,11 @@
   let heartbeats = $state([])
 
   // The token field is only in the way once a token is saved.
-  let showSettings = $state(!getToken())
+  let showSettings = $state(false)
+
+  let booting = $state(true)
+  let needsSetup = $state(false)
+  let serverConfigured = $state(true)
 
   let unreadCount = $state(0)
 
@@ -122,11 +128,35 @@
     load()
   }
 
-  onMount(() => {
-    if (getToken()) load()
+  function finishSetup() {
+    needsSetup = false
+    token = getToken()
+    load()
+  }
+
+  onMount(async () => {
+    try {
+      const status = await fetchSetupStatus()
+      serverConfigured = status.configured
+      // Either the server has never been set up, or this browser has no token.
+      needsSetup = !status.configured || !getToken()
+    } catch {
+      // If the status call fails the server is unreachable; fall back to the
+      // normal screen so the error is visible rather than a stuck wizard.
+      needsSetup = !getToken()
+    } finally {
+      booting = false
+    }
+
+    if (!needsSetup) load()
   })
 </script>
 
+{#if booting}
+  <div class="booting"></div>
+{:else if needsSetup}
+  <Setup configured={serverConfigured} onDone={finishSetup} />
+{:else}
 <main>
   <Header unread={unreadCount} down={silentCount} />
 
@@ -224,8 +254,15 @@
     </button>
   {/if}
 </main>
+{/if}
 
 <style>
+  /* Held blank for the moment it takes to ask whether setup is needed —
+     showing the timeline and then replacing it with a wizard would flash. */
+  .booting {
+    min-height: 100vh;
+  }
+
   main {
     max-width: 760px;
     margin: 0 auto;

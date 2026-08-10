@@ -5,8 +5,48 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+ENV_PATH= BASE_DIR / ".env"
+_overrides: dict[str, str] = {}
 
-load_dotenv(BASE_DIR / ".env")
+load_dotenv(ENV_PATH)
+
+def _current(name: str) -> str | None:
+    return _overrides.get(name) or os.environ.get(name) or None
+
+def admin_token() -> str | None:
+    return _current("SIGNAL_ADMIN_TOKEN")
+
+def vapid_public_key() -> str | None:
+    return _current("SIGNAL_VAPID_PUBLIC_KEY")
+
+def vapid_private_key() -> str | None:
+    return _current("SIGNAL_VAPID_PRIVATE_KEY")
+
+def is_configured() -> bool:
+    return admin_token() is not None
+
+def persist_env(values: dict[str, str]) -> None:
+    existing = ENV_PATH.read_text(encoding="utf-8").splitlines() if ENV_PATH.exists() else []
+
+    remaining = dict(values)
+    out: list[str] = []
+    for line in existing:
+        key = line.split("=", 1)[0].strip()
+        if key in remaining:
+            out.append(f"{key}={remaining.pop(key)}")
+        else:
+            out.append(line)
+    out.extend(f"{key}={value}" for key, value in remaining.items())
+
+    ENV_PATH.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+    try:
+        ENV_PATH.chmod(0o600)
+    except OSError:
+        pass
+
+    _overrides.update(values)
+    os.environ.update(values)
 
 def _env_str(name: str, default: str) -> str:
     value = os.environ.get(name)
@@ -35,6 +75,7 @@ class Settings:
     vapid_private_key: str | None
     vapid_subject: str
     frontend_dir: Path | None
+    setup_allow_remote: bool
 
 def load_settings() -> Settings:
     raw_db_path = Path(_env_str("SIGNAL_DATABASE_PATH", "data/signal.db"))
@@ -55,6 +96,7 @@ def load_settings() -> Settings:
         vapid_private_key=_env_str("SIGNAL_VAPID_PRIVATE_KEY", "") or None,
         vapid_subject=_env_str("SIGNAL_VAPID_SUBJECT", "mailto:admin@localhost"),
         frontend_dir=frontend_dir if frontend_dir.is_dir() else None,
+        setup_allow_remote=_env_bool("SIGNAL_SETUP_ALLOW_REMOTE", False),
     )
 
 settings = load_settings()

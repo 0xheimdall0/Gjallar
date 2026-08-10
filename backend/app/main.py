@@ -2,17 +2,18 @@ import hmac
 import json
 import logging
 import sqlite3
+import secrets
 from contextlib import asynccontextmanager
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, status
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, status, Request
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from starlette.requests import Request
 
-from . import __version__
-from .auth import verify_token
+from . import __version__, config
+from .auth import verify_token, hash_token, generate_token, TOKEN_PREFIX_LENGTH
 from .config import settings
 from .db import get_db, init_db, utc_now
 from .heartbeats import check_heartbeats, record_heartbeat_event
@@ -20,13 +21,18 @@ from .models import (
     EventIn,
     EventOut,
     EventPage,
+    SourceOut,
     EventRead,
+    SourceCreate,
     HeartbeatOut,
+    SourceCreated,
     HeartbeatPing,
     PushSubscriptionIn,
     Severity,
+
 )
 from .push import notify_event
+from .vapid import generate_vapid_pair
 from .ratelimit import enforce_rate_limit
 from .retention import purge_old_events
 
@@ -144,11 +150,11 @@ def create_event(
     return EventOut(id=cursor.lastrowid, received_at=received_at)
 
 def require_admin(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> None:
-    if settings.admin_token is None:
+    if config.admin_token() is None:
         raise HTTPException(503, "Admin token not configured on the server.")
     if credentials is None:
         raise HTTPException(401, "Missing token.", headers={"WWW-Authenticate": "Bearer"})
-    if not hmac.compare_digest(credentials.credentials, settings.admin_token):
+    if not hmac.compare_digest(credentials.credentials, config.admin_token()):
         logger.warning("admin auth rejected")
         raise HTTPException(401, "Credentials don't match.")
 
@@ -264,9 +270,9 @@ def set_event_read(
 
 @app.get("/api/push/key")
 def push_key(_: None = Depends(require_admin)) -> dict:
-    if not settings.vapid_public_key:
+    if not config.vapid_public_key():
         raise HTTPException(503, "Push is not configured on the server.")
-    return {"public_key": settings.vapid_public_key}
+    return {"public_key": config.vapid_public_key()}
 
 @app.post("/api/push/subscribe", status_code=201)
 def push_subscribe(
@@ -404,6 +410,92 @@ async def security_headers(request: Request, call_next):
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
     return response
+
+@app.get("/api/setup/status")
+def setup_status(db: sqlite3.Connection = Depends(get_db)) -> dict:
+    configured = config.is_configured()
+
+    source_count = 0
+    if configured:
+        source_count = db.execute(
+            "SELECT COUNT(*) AS n FROM sources WHERE revoked_at IS NULL"
+        ).fetchone()["n"]
+
+    return {
+        "configured": configured,
+        "push_configured": config.vapid_public_key() is not None,
+        "source_count": source_count,
+    }
+
+@app.post("/api/setup/claim")
+def setup_claim(request: Request) -> dict:
+    if config.is_configured():
+        raise HTTPException(409, "Gjallar is already configured.")
+
+    client = request.client.host if request.client else ""
+    if client not in {"127.0.0.1", "::1"} and not settings.setup_allow_remote:
+        logger.warning("setup claim refused from %s.", client)
+        raise HTTPException(403, "Setup must be completed from the machine running Gjallar.")
+
+    admin = secrets.token_urlsafe(32)
+    private_key, public_key = generate_vapid_pair()
+
+    config.persist_env(
+        {
+            "SIGNAL_ADMIN_TOKEN": admin,
+            "SIGNAL_VAPID_PUBLIC_KEY": public_key,
+            "SIGNAL_VAPID_PRIVATE_KEY": private_key,
+        }
+    )
+
+    logger.warning("Gjallar claimed from %s. Admin token generated.", client)
+    return {"admin_token": admin}
+
+@app.get("/api/sources", response_model=list[SourceOut])
+def list_sources(
+    _: None = Depends(require_admin),
+    db: sqlite3.Connection = Depends(get_db),
+) -> list[SourceOut]:
+    rows = db.execute(
+        "SELECT name, description, created_at, last_seen_at, revoked_at, FROM sources ORDER BY name"
+    ).fetchall()
+
+    return [
+        SourceOut(
+            name=r["name"],
+            description=r["description"],
+            created_at=r["created_at"],
+            last_seen_at=r["last_seen_at"],
+            revoked=r["revoked_at"] is not None,
+        )
+        for r in rows
+    ]
+
+@app.post("/api/sources", response_model=SourceCreated, status_code=201)
+def create_source(
+    payload: SourceCreate,
+    _: None = Depends(require_admin),
+    db: sqlite3.Connection = Depends(get_db),
+) -> SourceCreated:
+    token = generate_token()
+    try:
+        db.execute(
+            "INSERT INTO sources (name, token_prefix, token_hash, description, created_at)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (
+                payload.name,
+                token[:TOKEN_PREFIX_LENGTH],
+                hash_token(token),
+                payload.description,
+                utc_now(),
+            ),
+        )
+        db.commit()
+    except sqlite3.IntegrityError:
+        raise HTTPException(409, "A source with that name already exists.")
+
+    logger.info("source created: %s", payload.name)
+    return SourceCreated(name=payload.name, token=token)
 
 if settings.frontend_dir is not None:
     app.mount(

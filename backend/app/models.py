@@ -57,3 +57,27 @@ class HeartbeatOut(BaseModel):
     grace_seconds: int
     last_ping_at: str | None
     paused: bool
+
+class SourceCreate(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    # Letters, digits, spaces and mild punctuation. The point of the pattern is
+    # to exclude control characters — a newline in a source name would let a
+    # caller forge extra lines in the log file — not to be fussy about spelling.
+    name: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9 _.()\[\]#/@:+-]+$",
+    )
+    description: str | None = Field(default=None, max_length=200)
+
+class SourceCreated(BaseModel):
+    name: str
+    token: str
+
+class SourceOut(BaseModel):
+    name: str
+    description: str | None
+    created_at: str
+    last_seen_at: str | None
+    revoked: bool
