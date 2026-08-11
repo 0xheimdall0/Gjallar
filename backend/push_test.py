@@ -2,10 +2,9 @@
 
 import json
 
-from pywebpush import WebPushException, webpush
-
 from app.config import settings
 from app.db import connect
+from pywebpush import WebPushException, webpush
 
 conn = connect()
 sub = conn.execute("SELECT * FROM push_subscriptions LIMIT 1").fetchone()

@@ -1,0 +1,33 @@
+target-version = "py311"
+line-length = 100
+
+extend-exclude = ["frontend", ".venv", "backend/.venv"]
+
+[lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "B",    # bugbear
+    "I",    # import sorting
+    "UP",   # pyupgrade
+    "C4",   # comprehensions
+    "SIM",  # simplifications
+    "BLE",  # blind except
+    "S",    # bandit security rules
+]
+
+[lint.flake8-bugbear]
+# FastAPI's dependency markers are *designed* to be called in argument
+# defaults — that is how the framework declares dependencies. B008 exists to
+# catch mutable defaults evaluated once by accident, which these are not.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Header",
+    "fastapi.Body",
+    "fastapi.Form",
+    "fastapi.File",
+    "fastapi.Security",
+]

@@ -1,3 +1,4 @@
+import contextlib
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,10 +41,10 @@ def persist_env(values: dict[str, str]) -> None:
 
     ENV_PATH.write_text("\n".join(out) + "\n", encoding="utf-8")
 
-    try:
+    # Owner-only permissions where the platform supports them. Windows does
+    # not, and that is not a failure worth stopping for.
+    with contextlib.suppress(OSError):
         ENV_PATH.chmod(0o600)
-    except OSError:
-        pass
 
     _overrides.update(values)
     os.environ.update(values)

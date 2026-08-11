@@ -1,8 +1,9 @@
 import sqlite3
 import sys
 
+from app.auth import TOKEN_PREFIX_LENGTH, generate_token, hash_token
 from app.db import connect, init_db, utc_now
-from app.auth import generate_token, hash_token, TOKEN_PREFIX_LENGTH
+
 
 def create_source(name: str, description: str | None = None) -> None:
     init_db()
@@ -34,7 +35,8 @@ def list_sources() -> None:
     ).fetchall()
     for r in rows:
         status = "revoked" if r["revoked_at"] else "active"
-        print(f"{r['name']:20} {r['token_prefix']}... {status:8} last seen: {r['last_seen_at'] or 'never'}")
+        last_seen = r["last_seen_at"] or "never"
+        print(f"{r['name']:20} {r['token_prefix']}... {status:8} last seen: {last_seen}")
     conn.close()
 
 def revoke_source(name: str) -> None:
@@ -51,10 +53,14 @@ def revoke_source(name: str) -> None:
 
 if __name__ == "__main__":
     match sys.argv[1:]:
-        case ["create-source", name]:          create_source(name)
-        case ["create-source", name, desc]:    create_source(name, desc)
-        case ["list-sources"]:                  list_sources()
-        case ["revoke-source", name]:           revoke_source(name)
+        case ["create-source", name]:
+            create_source(name)
+        case ["create-source", name, desc]:
+            create_source(name, desc)
+        case ["list-sources"]:
+            list_sources()
+        case ["revoke-source", name]:
+            revoke_source(name)
         case _:
             print(__doc__)
             sys.exit(1)

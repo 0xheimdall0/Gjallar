@@ -1,4 +1,4 @@
-from app.db import init_db, connect, utc_now
+from app.db import connect, init_db, utc_now
 
 init_db()
 conn = connect()

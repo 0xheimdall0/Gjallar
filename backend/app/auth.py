@@ -1,3 +1,4 @@
+import contextlib
 import secrets
 import sqlite3
 
@@ -25,18 +26,25 @@ def verify_token(conn: sqlite3.Connection, token: str) -> sqlite3.Row | None:
         return None
 
     prefix = token[:TOKEN_PREFIX_LENGTH]
-    row = conn.execute("SELECT * FROM sources WHERE token_prefix = ? AND revoked_at IS NULL", (prefix,)).fetchone()
+    row = conn.execute(
+        "SELECT * FROM sources WHERE token_prefix = ? AND revoked_at IS NULL",
+        (prefix,),
+    ).fetchone()
     if row is None:
-        try:
+        # Burn the same CPU time as a real verification so that an unknown
+        # prefix is indistinguishable from a wrong token. It always fails;
+        # suppressing that is the point.
+        with contextlib.suppress(VerificationError):
             _hasher.verify(_DUMMY_HASH, token)
-        except Exception:
-            pass
         return None
 
+    # A failure here means the token is wrong. It must NOT fall through —
+    # suppressing this exception would authenticate anyone who knows the
+    # (publicly stored) prefix.
     try:
         _hasher.verify(row["token_hash"], token)
     except (VerifyMismatchError, VerificationError):
-        pass
+        return None
 
     conn.execute("UPDATE sources SET last_seen_at = ? WHERE id = ?", (utc_now(), row["id"]))
     conn.commit()

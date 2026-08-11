@@ -1,19 +1,26 @@
 import hmac
 import json
 import logging
-import sqlite3
 import secrets
+import sqlite3
 from contextlib import asynccontextmanager
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, status, Request
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Query,
+    Request,
+    status,
+)
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
-from starlette.requests import Request
 
 from . import __version__, config
-from .auth import verify_token, hash_token, generate_token, TOKEN_PREFIX_LENGTH
+from .auth import TOKEN_PREFIX_LENGTH, generate_token, hash_token, verify_token
 from .config import settings
 from .db import get_db, init_db, utc_now
 from .heartbeats import check_heartbeats, record_heartbeat_event
@@ -22,20 +29,19 @@ from .models import (
     EventIn,
     EventOut,
     EventPage,
-    SourceOut,
     EventRead,
-    SourceCreate,
     HeartbeatOut,
-    SourceCreated,
     HeartbeatPing,
     PushSubscriptionIn,
     Severity,
-
+    SourceCreate,
+    SourceCreated,
+    SourceOut,
 )
 from .push import notify_event
-from .vapid import generate_vapid_pair
 from .ratelimit import enforce_rate_limit
 from .retention import purge_old_events
+from .vapid import generate_vapid_pair
 
 scheduler = BackgroundScheduler(daemon=True)
 
@@ -124,7 +130,8 @@ def create_event(
     enforce_rate_limit(source["id"])
     received_at = utc_now()
     cursor = db.execute(
-        "INSERT INTO events (source_id, title, message, severity, tags, metadata, link, received_at)"
+        "INSERT INTO events"
+        " (source_id, title, message, severity, tags, metadata, link, received_at)"
         " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (
             source["id"],
@@ -199,6 +206,8 @@ def list_events(
 
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
+    # The only interpolation is where_sql, built from string literals above;
+    # every user value travels as a bound parameter.
     rows = db.execute(
         f"""
         SELECT e.*, s.name AS source_name
@@ -207,7 +216,7 @@ def list_events(
         {where_sql}
         ORDER BY e.id DESC
         LIMIT ?
-        """,
+        """,  # noqa: S608
         (*params, limit)
     ).fetchall()
 
@@ -222,7 +231,7 @@ def list_events(
             metadata=json.loads(r["metadata"]) if r["metadata"] else None,
             link=r["link"],
             received_at=r["received_at"],
-            read_at=r["read_at"], 
+            read_at=r["read_at"],
         )
         for r in rows
     ]
@@ -320,7 +329,9 @@ def heartbeat_ping(
                 400, "First ping must include expected_interval_seconds to register the heartbeat."
             )
         db.execute(
-            "INSERT INTO heartbeats (source_id, name, expected_interval_seconds, grace_seconds, last_ping_at, state, created_at)"
+            "INSERT INTO heartbeats"
+            " (source_id, name, expected_interval_seconds, grace_seconds,"
+            "  last_ping_at, state, created_at)"
             " VALUES (?, ?, ?, ?, ?, 'ok', ?)",
             (
                 source["id"],
@@ -610,8 +621,8 @@ def create_source(
             ),
         )
         db.commit()
-    except sqlite3.IntegrityError:
-        raise HTTPException(409, "A source with that name already exists.")
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(409, "A source with that name already exists.") from exc
 
     logger.info("source created: %s", payload.name)
     return SourceCreated(name=payload.name, token=token)

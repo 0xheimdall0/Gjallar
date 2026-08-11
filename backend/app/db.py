@@ -1,6 +1,6 @@
 import sqlite3
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .config import settings
@@ -8,7 +8,7 @@ from .config import settings
 SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 def connect() -> sqlite3.Connection:
     conn = sqlite3.connect(
@@ -38,4 +38,4 @@ def get_db() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 def parse_utc(value: str) -> datetime:
-    return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)

@@ -100,6 +100,22 @@ less there is to leak.
 is the right default regardless: it forbids silent background pushes, so the
 server cannot wake the client without the user seeing something.
 
+### Rotating VAPID keys is an outage, not a config change
+
+A browser binds each push subscription to the public key that created it. Change
+the pair and every existing subscription becomes not merely invalid but
+*obstructive*: `pushManager.subscribe()` refuses to replace it, with an error
+that names neither the cause nor the fix.
+
+So key rotation has an operational cost — every device must reopen the app and
+re-enable notifications, and until it does it silently receives nothing. The
+client handles the mechanics (it drops a subscription whose key no longer
+matches before subscribing again), but nothing can spare the user the round
+trip.
+
+If the private key ever leaks, that is the recovery path, and it is worth
+knowing in advance rather than discovering it mid-incident.
+
 ### The VAPID private key is a signing credential
 
 It authenticates *this server* to push services. Leaking it lets someone send
@@ -107,6 +123,43 @@ notifications that appear to come from Gjallar to every device subscribed to it.
 It lives in `.env`, never in the repository, and is generated once —
 regenerating invalidates every existing subscription, since browsers bind a
 subscription to the public key it was created with.
+
+### Claim on first use
+
+A setup wizard that cannot create the admin token isn't solving setup — the user
+is back to editing `.env`. So an unconfigured instance will provision itself:
+`POST /api/setup/claim` generates the admin token and a VAPID pair, writes them
+to `backend/.env`, and returns the admin token once.
+
+That is trust on first use: whoever reaches an unclaimed instance takes
+ownership of it. Grafana, Jellyfin and Home Assistant all work this way. Two
+guards make it acceptable here:
+
+1. **It stops working permanently once a token exists** — `409` thereafter.
+2. **Loopback clients only**, unless `SIGNAL_SETUP_ALLOW_REMOTE=true`. Setup has
+   to happen on the machine Gjallar runs on, not from anywhere that can reach
+   it.
+
+Every claim, and every refused claim, is logged at `WARNING` with the client
+address.
+
+Residual risk worth stating plainly: behind a reverse proxy that forwards to
+`127.0.0.1` — `tailscale serve`, for instance — the loopback check sees the
+proxy, not the real client. On a private tailnet that means "anyone on my
+tailnet", which is an acceptable trust boundary for this application but is not
+the same as "only me".
+
+### Deleting a source deletes its history
+
+`DELETE /api/sources/{id}` cascades, because `events.source_id` and
+`heartbeats.source_id` are declared `ON DELETE CASCADE`. Removing a machine
+removes every event it ever filed.
+
+That is why revoke and delete are separate operations. Revoking disables the
+credential and keeps the record — the right answer for a stolen laptop, where
+the history is evidence. Deleting is for cleaning up a test source. The
+interface spells out the difference in the confirmation dialog rather than
+relying on the user knowing the schema.
 
 ### Admin token in `localStorage` — a knowing tradeoff
 
@@ -152,8 +205,46 @@ Known, deliberate, and documented rather than overlooked.
 | 3 | Logging is unstructured text | Fine to read, awkward to query or ship to a SIEM | JSON formatter and a `security` logger namespace |
 | 4 | The scheduler lives in the application process | Running uvicorn with more than one worker would give each its own scheduler, so one outage would produce several alerts | Single process is the documented deployment; otherwise move the job out or take a lock in the database |
 | 5 | Notification delivery is unverifiable end to end | `201` from a push service means *accepted*, not *displayed* — see the incident below | Platform limit. The timeline, not the notification, is the source of truth |
+| 6 | Setup claim trusts the client address | Behind a proxy forwarding from `127.0.0.1`, the loopback guard sees the proxy, so anyone on the tailnet could claim an unconfigured instance | Acceptable trust boundary here; claim during the first minute of running it |
+| 7 | No automated tests | Correctness is checked by hand and by ad-hoc scripts. The authentication bypass below survived precisely because nothing exercised the failure path | `pytest` covering auth failure modes, ingest validation and the heartbeat state machine |
 
-## Incident worth recording
+## Incident: authentication bypass on token mismatch
+
+Found while cleaning up linter findings, not by the linter itself.
+
+`verify_token` looked like this:
+
+```python
+    try:
+        _hasher.verify(row["token_hash"], token)
+    except (VerifyMismatchError, VerificationError):
+        pass
+
+    conn.execute("UPDATE sources SET last_seen_at = ? WHERE id = ?", ...)
+    return row
+```
+
+A failed verification was swallowed and execution fell through to `return row`.
+**Any token with a correct 12-character prefix authenticated, whatever followed
+it** — and the prefix is stored in the clear and printed in the logs on every
+rejected request. The impact is event forgery: writing to any source's timeline,
+including fake heartbeat recoveries that would suppress a real outage alert.
+
+It was introduced when a `return None` became a `pass` during an edit. Every
+integration test still passed, because they all used correct tokens; the earlier
+adversarial test that would have caught it was written before the regression.
+
+Two things this changes:
+
+- **Failure paths need tests as much as success paths.** The check now lives in
+  the test set: correct token authenticates, right-prefix-wrong-key is rejected,
+  unknown prefix is rejected.
+- **`except: pass` deserves suspicion in any security-relevant function.** Ruff's
+  `S110` and `BLE001` flagged the *shape* of this code without understanding the
+  consequence. They were right for the wrong reason — which was enough, because
+  they made me read it.
+
+## Incident: the alert that was never displayed
 
 Push appeared completely broken for about an hour. The server reported `HTTP 201`
 from Mozilla on every attempt, the subscription row existed, the service worker

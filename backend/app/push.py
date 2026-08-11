@@ -35,7 +35,7 @@ def _send(conn: sqlite3.Connection, sub: sqlite3.Row, payload: dict) -> None:
         logger.warning(
             "push failed for subscription %s (%s): status=%s body=%s",
             sub["id"],
-            sub["label"] or 'unlabelled', 
+            sub["label"] or 'unlabelled',
             status,
             exc.response.text[:200] if exc.response is not None else "no response",
         )

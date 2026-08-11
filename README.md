@@ -44,7 +44,9 @@ Named after Gjallarhorn — the horn Heimdall sounds when something is coming.
 - **One-line ingest** — any script that can run `curl` can report to Gjallar. No client library, no SDK, no agent to install.
 - **Timeline** — every event from every machine in one place, newest first, with severity, source, tags and free-text message.
 - **Filtering & search** — by source, by severity, by tag, by full-text match on title or message, or unread only.
-- **Read/unread tracking** — click an event to mark it read; read entries recede and the unread count sits in the header. Deliberate rather than automatic: scrolling past an alert is not the same as having dealt with it.
+- **First-run wizard** — open a fresh install and it provisions its own admin token and push keys, creates your first source, and hands you a working command. No editing config files to get started.
+- **Management view** — create, revoke and delete sources; pause or delete heartbeats; and a **command builder** that writes the exact `curl` or PowerShell line for your server, shell and severity.
+- **Read/unread tracking** — click an event to mark it read; read entries recede and the unread count sits in the header. Deliberate rather than automatic: scrolling past an alert is not the same as having dealt with it. Select several at once to delete in bulk.
 - **Cursor pagination** — pages are requested by last-seen id, so events arriving mid-scroll are never silently skipped.
 - **Installable PWA** — add it to your phone's home screen or your desktop; it opens in its own window and works offline for anything already loaded.
 - **Web Push notifications** — events reach you with the app closed. Each device sets its own severity floor, so the phone can stay quiet while the desktop shows everything, and `critical` alerts stay on screen until acknowledged.
@@ -72,10 +74,12 @@ Full threat model, decisions taken and known open weaknesses:
 
 ## Requirements
 
-- **Python 3.11+** and **Node 18+** to run from source.
+- **Python 3.11+** (the backend uses `datetime.UTC`) and **Node 18+**.
 - Nothing else — no database server, no cache, no broker.
 
 ## Quick start
+
+Nothing to configure by hand — the first-run wizard provisions everything.
 
 ```bash
 git clone https://github.com/0xheimdall0/Gjallar.git
@@ -90,47 +94,59 @@ python -m venv .venv
 # source .venv/bin/activate       # macOS / Linux
 
 pip install -r requirements.txt
-copy .env.example .env            # then set SIGNAL_ADMIN_TOKEN
-
-uvicorn app.main:app --reload --port 8002
-```
-
-Generate the admin token the UI will use:
-
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-```
-
-Generate the VAPID key pair that signs push messages, and put both lines plus a
-contact address into `.env`:
-
-```bash
-python generate_vapid.py
-# SIGNAL_VAPID_PRIVATE_KEY=...
-# SIGNAL_VAPID_PUBLIC_KEY=...
-# SIGNAL_VAPID_SUBJECT=mailto:you@example.com
-```
-
-Run it once. Regenerating the pair invalidates every existing subscription,
-because browsers bind a subscription to the public key it was created with.
-
-Issue a token to a machine (printed once, unrecoverable):
-
-```bash
-python manage.py create-source nas "Home NAS"
-python manage.py list-sources
-python manage.py revoke-source nas
+uvicorn app.main:app --port 8000
 ```
 
 **Frontend**, from `frontend/`:
 
 ```bash
 npm install
-npm run dev
+npm run build      # the backend serves the result at http://127.0.0.1:8000
 ```
 
-Open <http://localhost:5173>. Vite proxies `/api/*` to the backend, so the
-browser only ever sees one origin and no CORS configuration is required.
+Then open <http://127.0.0.1:8000> and the wizard takes over:
+
+1. **Set up this instance** — generates the admin token and the VAPID key pair
+   for push, and writes them to `backend/.env`.
+2. **Save the admin token** — shown once, and already stored in this browser.
+3. **Name your first source** — you get its token and a ready-made `curl`.
+4. **Enable notifications**, if this device can receive them.
+
+Setup only works while the instance is unclaimed, and only from the machine it
+runs on. See [the security notes](docs/security-notes.md#claim-on-first-use)
+for the reasoning.
+
+While working on the frontend, run `npm run dev` instead and use
+<http://localhost:5173> — Vite proxies `/api/*` to the backend, so the browser
+still sees a single origin and no CORS configuration is needed.
+
+### Doing it by hand instead
+
+The wizard is a convenience; everything it does can be done directly.
+
+```bash
+# admin token for the interface
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+
+# key pair that signs push messages
+python generate_vapid.py
+```
+
+Put those in `backend/.env` (copy `.env.example`) as `SIGNAL_ADMIN_TOKEN`,
+`SIGNAL_VAPID_PRIVATE_KEY`, `SIGNAL_VAPID_PUBLIC_KEY` and a contact address in
+`SIGNAL_VAPID_SUBJECT`.
+
+Generate the VAPID pair **once**. Regenerating it invalidates every existing
+subscription, because a browser binds its subscription to the public key that
+created it — and every device then has to re-enable notifications.
+
+Sources can be managed from the command line as well as from the interface:
+
+```bash
+python manage.py create-source nas "Home NAS"
+python manage.py list-sources
+python manage.py revoke-source nas
+```
 
 ## Running it for real
 
@@ -293,18 +309,35 @@ curl -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | `GET` | `/api/health` | none | liveness check; touches the database |
+| `GET` | `/api/setup/status` | none | whether this instance is configured |
+| `POST` | `/api/setup/claim` | none, once | provision admin token and push keys |
 | `POST` | `/api/events` | source token | file an event |
 | `GET` | `/api/events` | admin token | timeline, filters, pagination |
 | `POST` | `/api/events/{id}/read` | admin token | mark one event read (`?read=false` to undo) |
 | `POST` | `/api/events/read-all` | admin token | mark every unread event read |
-| `GET` | `/api/push/key` | admin token | VAPID public key for subscribing |
-| `POST` | `/api/push/subscribe` | admin token | register this device for notifications |
+| `DELETE` | `/api/events/{id}` | admin token | delete one event |
+| `POST` | `/api/events/delete` | admin token | delete many, `{"ids": [...]}`, max 500 |
 | `POST` | `/api/heartbeats/{name}/ping` | source token | check in; registers the heartbeat on first ping |
 | `GET` | `/api/heartbeats` | admin token | all heartbeats and their current state |
+| `POST` | `/api/heartbeats/{id}/pause` | admin token | suspend silence checking (`?paused=false` to resume) |
+| `DELETE` | `/api/heartbeats/{id}` | admin token | stop watching a heartbeat |
+| `GET` | `/api/sources` | admin token | list sources |
+| `POST` | `/api/sources` | admin token | create a source; returns its token once |
+| `POST` | `/api/sources/{id}/revoke` | admin token | disable the token, keep the history |
+| `DELETE` | `/api/sources/{id}` | admin token | delete the source **and everything it sent** |
+| `GET` | `/api/push/key` | admin token | VAPID public key for subscribing |
+| `POST` | `/api/push/subscribe` | admin token | register this device for notifications |
 
 A heartbeat's first ping must carry `expected_interval_seconds` to register it;
 `grace_seconds` is optional and defaults to 300. Later pings can send an empty
 body, or supply new values to change the schedule.
+
+Sources and heartbeats are addressed by **id**, not by name — names may contain
+spaces and punctuation, which would need escaping in a URL path.
+
+`POST /api/setup/claim` works only while the instance is unconfigured, and only
+for loopback clients unless `SIGNAL_SETUP_ALLOW_REMOTE=true`. Once an admin
+token exists it returns `409` permanently.
 
 `POST /api/events` accepts `title` (required), `message`, `severity`
 (`debug` / `info` / `warn` / `error` / `critical`), `tags`, `metadata` and `link`.
@@ -322,12 +355,15 @@ and `unread`.
 
 ## Usage
 
-1. Start the backend, set an admin token in `.env`, and open the UI.
-2. Paste the admin token into the field at the top and save it.
-3. Issue a source token per machine with `manage.py create-source`.
-4. Add one `curl` line to any script you want to hear from.
-5. Click **Enable notifications** to register the device for push.
-6. Filter by severity, source or tag when something needs finding.
+1. Start it, open it, and follow the setup wizard.
+2. In **Manage**, create a source for each machine you want to hear from.
+3. Use the **command builder** there to produce the exact line for that machine,
+   and paste it into whatever script should report.
+4. Add a heartbeat ping to anything that runs on a schedule, so that the job
+   disappearing is itself an alert.
+5. Click **Enable notifications** on each device that should be interrupted.
+6. Filter by severity, source or tag when something needs finding; click an
+   event to mark it read, or **Select** several to delete at once.
 
 ## Troubleshooting
 
@@ -389,15 +425,23 @@ backend/
     main.py       FastAPI application and routes
   manage.py       admin CLI
   generate_vapid.py  one-shot VAPID key generator
+  vapid.py        push key generation, shared by CLI and setup endpoint
 frontend/
   src/
-    App.svelte    timeline, filters, token entry
+    App.svelte    timeline, filters, selection
     sw.js         service worker: precache, push, notification click
     lib/
       api.js      the only module that talks to the backend
       push.js     permission prompt and subscription registration
+      Setup.svelte      first-run wizard
+      Manage.svelte     sources, heartbeats, command builder
+      Header.svelte
       EventCard.svelte
       HeartbeatPanel.svelte
+scripts/
+  gjallar.sh      client for Linux and macOS
+  Gjallar.psm1    client for PowerShell
+  gjallar-health.ps1  example: daily disk report with a heartbeat
 docs/             notes and write-ups
 ```
 

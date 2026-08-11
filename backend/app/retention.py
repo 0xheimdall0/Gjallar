@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from .config import settings
 from .db import connect
@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 def purge_old_events() -> None:
     cutoff = (
-        datetime.now(timezone.utc) - timedelta(days=settings.retention_days)
+        datetime.now(UTC) - timedelta(days=settings.retention_days)
     ).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     conn = connect()

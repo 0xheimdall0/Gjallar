@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .db import connect, parse_utc, utc_now
 from .push import notify_event
@@ -41,7 +41,7 @@ def record_heartbeat_event(
 def check_heartbeats() -> None:
     conn = connect()
     try:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         rows = conn.execute(
             "SELECT h.*, s.name AS source_name FROM heartbeats h"
             " JOIN sources s ON s.id = h.source_id WHERE h.paused= 0"

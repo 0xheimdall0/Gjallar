@@ -27,7 +27,7 @@ class EventRead(BaseModel):
     tags: list[str]
     metadata: dict | None
     link: str | None
-    received_at: str 
+    received_at: str
     read_at: str | None
 
 class EventIdList(BaseModel):
