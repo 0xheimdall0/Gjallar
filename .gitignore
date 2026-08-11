@@ -237,11 +237,6 @@ backend/data/
 # Build output
 frontend/dist/
 frontend/dev-dist/
-frontend/package.json
-frontend/package-lock.json
 
 # Node
 node_modules/
-
-#Scripts
-scripts/
