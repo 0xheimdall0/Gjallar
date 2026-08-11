@@ -32,14 +32,17 @@ Named after Gjallarhorn — the horn Heimdall sounds when something is coming.
 
 | Done | In progress / planned |
 |---|---|
-| Database schema — sources, events, heartbeats, subscriptions | Docker build (written, not yet verified) |
-| Source token authentication (Argon2, prefix lookup, revocation) | First-run setup wizard |
-| Event ingest endpoint with schema validation | |
-| Read API — filters, tag search, full-text search, pagination | |
-| Svelte timeline UI, read/unread tracking | |
+| Database schema — sources, events, heartbeats, subscriptions | Automated test suite (`pytest`) |
+| Source token authentication (Argon2, prefix lookup, revocation) | Full-text search via SQLite FTS5 |
+| Event ingest endpoint with schema validation | Structured logging |
+| Read API — filters, tag search, search, cursor pagination | |
+| Svelte timeline UI, read/unread tracking, bulk delete | |
 | Installable PWA with Web Push notifications | |
 | Heartbeats — ping endpoint, silence checker, alerting | |
 | Security hardening pass (see security notes) | |
+| First-run setup wizard | |
+| Management view with command builder | |
+| Docker image, built and smoke-tested in CI | |
 
 ## Features
 
@@ -58,6 +61,7 @@ Named after Gjallarhorn — the horn Heimdall sounds when something is coming.
   - *Admin token* — read-only, used by the UI.
 - **Admin CLI** — create, list and revoke sources without touching the database.
 - **Single container** — FastAPI serves both the API and the built frontend. One SQLite file, no Redis, no message queue.
+- **Checked on every push** — CI lints the backend, builds the frontend, builds the image, and drives a fresh container through setup, ingest and a heartbeat before calling it green.
 
 ## Security model
 
@@ -164,14 +168,14 @@ Then <http://127.0.0.1:8000> is the whole application.
 
 ### With Docker
 
-> **Not yet verified.** The `Dockerfile` and `compose.yaml` are written and
-> committed, but they have not been built and run end to end — the supported
-> path today is running it directly, as above. Treat this section as intent
-> rather than instruction until this note disappears.
-
 ```bash
 docker compose up --build
 ```
+
+The image is built and smoke-tested on every push by
+[CI](.github/workflows/ci.yml): the container is started from a clean checkout,
+polled until healthy, then driven through setup, source creation, event ingest
+and a heartbeat ping. The badge at the top of this file reflects the last run.
 
 A two-stage build: Node compiles the frontend, and the runtime image copies only
 the output — so the shipped container has no Node toolchain in it. The database
@@ -454,6 +458,10 @@ scripts/
   Gjallar.psm1    client for PowerShell
   gjallar-health.ps1  example: daily disk report with a heartbeat
 docs/             notes and write-ups
+.github/
+  workflows/
+    ci.yml        lint, frontend build, image build, container smoke test
+ruff.toml         lint configuration, including FastAPI exemptions
 ```
 
 ## Files created

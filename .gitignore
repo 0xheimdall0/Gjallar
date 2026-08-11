@@ -14,8 +14,11 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Anchored to the repo root with a leading slash. Without it these match any
+# directory called lib/ anywhere in the tree — which silently excluded
+# frontend/src/lib and broke CI.
+/lib/
+/lib64/
 parts/
 sdist/
 var/

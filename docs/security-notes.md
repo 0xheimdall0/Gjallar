@@ -206,7 +206,7 @@ Known, deliberate, and documented rather than overlooked.
 | 4 | The scheduler lives in the application process | Running uvicorn with more than one worker would give each its own scheduler, so one outage would produce several alerts | Single process is the documented deployment; otherwise move the job out or take a lock in the database |
 | 5 | Notification delivery is unverifiable end to end | `201` from a push service means *accepted*, not *displayed* — see the incident below | Platform limit. The timeline, not the notification, is the source of truth |
 | 6 | Setup claim trusts the client address | Behind a proxy forwarding from `127.0.0.1`, the loopback guard sees the proxy, so anyone on the tailnet could claim an unconfigured instance | Acceptable trust boundary here; claim during the first minute of running it |
-| 7 | No automated tests | Correctness is checked by hand and by ad-hoc scripts. The authentication bypass below survived precisely because nothing exercised the failure path | `pytest` covering auth failure modes, ingest validation and the heartbeat state machine |
+| 7 | No unit tests | CI now drives the running container through setup, ingest, a forged-token rejection and a heartbeat, which covers the paths that broke before — but there is no unit-level suite | `pytest` covering auth failure modes, ingest validation and the heartbeat state machine |
 
 ## Incident: authentication bypass on token mismatch
 
