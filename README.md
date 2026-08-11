@@ -1,4 +1,4 @@
-# Gjallar — Heimdall's Signal Inbox
+# Gjallar ; Heimdall's Signal Inbox
 
 [![CI](https://github.com/0xheimdall0/Gjallar/actions/workflows/ci.yml/badge.svg)](https://github.com/0xheimdall0/Gjallar/actions/workflows/ci.yml)
 
@@ -24,19 +24,19 @@ curl -H "Authorization: Bearer $TOKEN" \
 > it to the internet without TLS in front of it, and treat the tokens it issues
 > as real credentials.
 
-Named after Gjallarhorn — the horn Heimdall sounds when something is coming.
+Named after Gjallarhorn, the horn Heimdall sounds when something is coming.
 
 ---
 
 ## What's built
 
 - Four-table SQLite schema with constraints, cascades and partial indexes
-- Source token authentication — Argon2 hashes, prefix lookup, revocation
+- Source token authentication: Argon2 hashes, prefix lookup, revocation
 - Event ingest with schema validation, rate limiting and a payload cap
 - Read API with filters, tag and text search, and cursor pagination
 - Svelte timeline UI: read/unread tracking, selection, bulk delete
 - Installable PWA with Web Push, and per-device severity thresholds
-- Heartbeats — ping endpoint, silence checker, one alert per outage
+- Heartbeats: ping endpoint, silence checker, one alert per outage
 - First-run setup wizard and a management view with a command builder
 - Security hardening pass, documented in [docs/security-notes.md](docs/security-notes.md)
 - Docker image, built and smoke-tested in CI on every push
@@ -47,29 +47,29 @@ over.
 
 ## Features
 
-- **One-line ingest** — any script that can run `curl` can report to Gjallar. No client library, no SDK, no agent to install.
-- **Timeline** — every event from every machine in one place, newest first, with severity, source, tags and free-text message.
-- **Filtering & search** — by source, by severity, by tag, by full-text match on title or message, or unread only.
-- **First-run wizard** — open a fresh install and it provisions its own admin token and push keys, creates your first source, and hands you a working command. No editing config files to get started.
-- **Management view** — create, revoke and delete sources; pause or delete heartbeats; and a **command builder** that writes the exact `curl` or PowerShell line for your server, shell and severity.
-- **Read/unread tracking** — click an event to mark it read; read entries recede and the unread count sits in the header. Deliberate rather than automatic: scrolling past an alert is not the same as having dealt with it. Select several at once to delete in bulk.
-- **Cursor pagination** — pages are requested by last-seen id, so events arriving mid-scroll are never silently skipped.
-- **Installable PWA** — add it to your phone's home screen or your desktop; it opens in its own window and works offline for anything already loaded.
-- **Web Push notifications** — events reach you with the app closed. Each device sets its own severity floor, so the phone can stay quiet while the desktop shows everything, and `critical` alerts stay on screen until acknowledged.
-- **Heartbeats** — declare that a source must check in every *N* seconds with a grace period. A checker runs every minute looking for pings that didn't happen; crossing the grace boundary files a `critical` event, which then flows through the timeline and notifications like any other. Recovery is reported too, and one outage produces exactly one alert.
+- **One-line ingest**: any script that can run `curl` can report to Gjallar. No client library, no SDK, no agent to install.
+- **Timeline**: every event from every machine in one place, newest first, with severity, source, tags and free-text message.
+- **Filtering & search**: by source, by severity, by tag, by full-text match on title or message, or unread only.
+- **First-run wizard**: open a fresh install and it provisions its own admin token and push keys, creates your first source, and hands you a working command. No editing config files to get started.
+- **Management view**: create, revoke and delete sources; pause or delete heartbeats; and a **command builder** that writes the exact `curl` or PowerShell line for your server, shell and severity.
+- **Read/unread tracking**: click an event to mark it read; read entries recede and the unread count sits in the header. Deliberate rather than automatic: scrolling past an alert is not the same as having dealt with it. Select several at once to delete in bulk.
+- **Cursor pagination**: pages are requested by last-seen id, so events arriving mid-scroll are never silently skipped.
+- **Installable PWA**: add it to your phone's home screen or your desktop; it opens in its own window and works offline for anything already loaded.
+- **Web Push notifications**: events reach you with the app closed. Each device sets its own severity floor, so the phone can stay quiet while the desktop shows everything, and `critical` alerts stay on screen until acknowledged.
+- **Heartbeats**: declare that a source must check in every *N* seconds with a grace period. A checker runs every minute looking for pings that didn't happen; crossing the grace boundary files a `critical` event, which then flows through the timeline and notifications like any other. Recovery is reported too, and one outage produces exactly one alert.
 - **Two credential types**
-  - *Source tokens* — write-only, one per machine or script, individually revocable.
-  - *Admin token* — read-only, used by the UI.
-- **Admin CLI** — create, list and revoke sources without touching the database.
-- **Single container** — FastAPI serves both the API and the built frontend. One SQLite file, no Redis, no message queue.
-- **Checked on every push** — CI lints the backend, builds the frontend, builds the image, and drives a fresh container through setup, ingest and a heartbeat before calling it green.
+  - *Source tokens*: write-only, one per machine or script, individually revocable.
+  - *Admin token*: read-only, used by the UI.
+- **Admin CLI**: create, list and revoke sources without touching the database.
+- **Single container**: FastAPI serves both the API and the built frontend. One SQLite file, no Redis, no message queue.
+- **Checked on every push**: CI lints the backend, builds the frontend, builds the image, and drives a fresh container through setup, ingest and a heartbeat before calling it green.
 
 ## Security model
 
 - **Tokens are never stored.** Only an Argon2id hash is kept; the first 12 characters are stored in the clear as an indexed lookup key, which is not sufficient to authenticate.
 - **Unknown tokens cost the same as wrong ones.** A prefix that matches nothing is still verified against a dummy hash, so response timing does not reveal which prefixes exist.
 - **Write and read credentials are separate.** A compromised backup script cannot read your timeline; a compromised browser session cannot forge events.
-- **Event identity comes from the token**, never from the request body — a source cannot file events as another source.
+- **Event identity comes from the token**, never from the request body. A source cannot file events as another source.
 - **Every query uses bound parameters.** Dynamic `WHERE` clauses are assembled only from string literals in the source; user values always go through placeholders.
 - **Output is escaped by default.** Event text is attacker-controlled and rendered in a browser; Svelte interpolation escapes it, and `{@html}` is never used.
 - **Tokens are shown once and cannot be recovered.** Lose one, revoke it and issue another.
@@ -82,11 +82,11 @@ Full threat model, decisions taken and known open weaknesses:
 ## Requirements
 
 - **Python 3.11+** (the backend uses `datetime.UTC`) and **Node 18+**.
-- Nothing else — no database server, no cache, no broker.
+- Nothing else. No database server, no cache, no broker.
 
 ## Quick start
 
-Nothing to configure by hand — the first-run wizard provisions everything.
+Nothing to configure by hand. The first-run wizard provisions everything.
 
 ```bash
 git clone https://github.com/0xheimdall0/Gjallar.git
@@ -113,18 +113,18 @@ npm run build      # the backend serves the result at http://127.0.0.1:8000
 
 Then open <http://127.0.0.1:8000> and the wizard takes over:
 
-1. **Set up this instance** — generates the admin token and the VAPID key pair
+1. **Set up this instance**: generates the admin token and the VAPID key pair
    for push, and writes them to `backend/.env`.
-2. **Save the admin token** — shown once, and already stored in this browser.
-3. **Name your first source** — you get its token and a ready-made `curl`.
-4. **Enable notifications**, if this device can receive them.
+2. **Save the admin token**: shown once, and already stored in this browser.
+3. **Name your first source**: you get its token and a ready-made `curl`.
+4. **Enable notifications**: if this device can receive them.
 
 Setup only works while the instance is unclaimed, and only from the machine it
 runs on. See [the security notes](docs/security-notes.md#claim-on-first-use)
 for the reasoning.
 
 While working on the frontend, run `npm run dev` instead and use
-<http://localhost:5173> — Vite proxies `/api/*` to the backend, so the browser
+<http://localhost:5173> ; Vite proxies `/api/*` to the backend, so the browser
 still sees a single origin and no CORS configuration is needed.
 
 ### Doing it by hand instead
@@ -145,7 +145,7 @@ Put those in `backend/.env` (copy `.env.example`) as `SIGNAL_ADMIN_TOKEN`,
 
 Generate the VAPID pair **once**. Regenerating it invalidates every existing
 subscription, because a browser binds its subscription to the public key that
-created it — and every device then has to re-enable notifications.
+created it, and every device then has to re-enable notifications.
 
 Sources can be managed from the command line as well as from the interface:
 
@@ -179,14 +179,14 @@ polled until healthy, then driven through setup, source creation, event ingest
 and a heartbeat ping. The badge at the top of this file reflects the last run.
 
 A two-stage build: Node compiles the frontend, and the runtime image copies only
-the output — so the shipped container has no Node toolchain in it. The database
+the output, so the shipped container has no Node toolchain in it. The database
 lives on a named volume, the process runs as an unprivileged user, and the port
 is bound to loopback rather than published to the network.
 
 ### Reaching it from your phone
 
 Notifications require a **secure context**. `localhost` qualifies; a LAN address
-over plain HTTP does not — so a service worker won't even register. On iOS the
+over plain HTTP does not, so a service worker won't even register. On iOS the
 app must additionally be installed to the home screen before Safari will deliver
 push at all.
 
@@ -204,7 +204,7 @@ screen, launch it from there, and enable notifications. Only devices on your
 tailnet can reach it, and the app never listens on a public interface.
 
 Use `tailscale serve --https=443 off` to stop. Do **not** use `tailscale funnel`
-for this — that publishes to the open internet.
+for this. That publishes to the open internet.
 
 ## Reporting from your machines
 
@@ -224,8 +224,8 @@ shown **once**.
 
 There are **two things a script can send**:
 
-- An **event** — "this happened". Appears in the timeline, may notify you.
-- A **ping** — "I'm still alive". Doesn't appear in the timeline; its *absence*
+- An **event**: "this happened". Appears in the timeline, may notify you.
+- A **ping**: "I'm still alive". Doesn't appear in the timeline; its *absence*
   is what raises an alert.
 
 Most scheduled jobs should send both: an event describing what happened, and a
@@ -233,7 +233,7 @@ ping so silence is noticed if the job stops running entirely.
 
 **Heartbeats register themselves.** The first ping must carry
 `expected_interval_seconds`, and that call creates the heartbeat. Later pings
-can send an empty body — or supply the interval again to change it. There is no
+can send an empty body, or supply the interval again to change it. There is no
 separate "create heartbeat" step.
 
 ### The easy way
@@ -241,7 +241,7 @@ separate "create heartbeat" step.
 `scripts/` contains a small client for each platform so you don't have to hand-
 write `curl`.
 
-**Linux and macOS** — set two variables once, in `~/.profile`:
+**Linux and macOS**: set two variables once, in `~/.profile`:
 
 ```bash
 export GJALLAR_URL=https://gjallar.example.com
@@ -255,7 +255,7 @@ gjallar.sh event "Backup finished" -m "412 GB in 3m21s" -s info -t backup
 gjallar.sh ping nightly-backup --every 86400 --grace 3600
 ```
 
-**Windows** — set the same two variables once:
+**Windows**: set the same two variables once:
 
 ```powershell
 [Environment]::SetEnvironmentVariable('GJALLAR_URL',   'https://gjallar.example.com', 'User')
@@ -272,7 +272,7 @@ Send-GjallarPing  -Name nightly-backup -Every 86400 -Grace 3600
 ```
 
 Neither client throws. If Gjallar is unreachable they warn and carry on, so
-reporting can never break the job doing the reporting — the missing ping is what
+reporting can never break the job doing the reporting. The missing ping is what
 tells you something went wrong.
 
 ### A complete example
@@ -339,7 +339,7 @@ A heartbeat's first ping must carry `expected_interval_seconds` to register it;
 `grace_seconds` is optional and defaults to 300. Later pings can send an empty
 body, or supply new values to change the schedule.
 
-Sources and heartbeats are addressed by **id**, not by name — names may contain
+Sources and heartbeats are addressed by **id**, not by name. Names may contain
 spaces and punctuation, which would need escaping in a URL path.
 
 `POST /api/setup/claim` works only while the instance is unconfigured, and only
@@ -362,7 +362,7 @@ heartbeat panel above everything so silence is the first thing you see.
 
 ### Management and command builder
 Create and revoke sources, pause or delete heartbeats, and generate the exact
-line to paste into a script — for your server, your shell, your severity.
+line to paste into a script for your server, your shell, your severity.
 
 ![Management view](docs/manage.png)
 
@@ -401,7 +401,7 @@ line to paste into a script — for your server, your shell, your severity.
    restart the browser. Note the tradeoff this asks of the user: it opens a
    connection to Google's infrastructure, which then sees push metadata for
    every subscribed site. Someone self-hosting a monitoring tool to avoid third
-   parties may reasonably decline — a real limitation of Web Push, not of this
+   parties may reasonably decline. A real limitation of Web Push, not of this
    application.
 4. **The subscription is current.** Unregistering the service worker or clearing
    site data invalidates the subscription; re-enable notifications to create a
@@ -409,7 +409,7 @@ line to paste into a script — for your server, your shell, your severity.
 
 **Push works on desktop but not on the phone.** Notifications require a secure
 context. `localhost` counts; a LAN IP over plain HTTP does not. Serve the app
-over HTTPS. On iOS, the app must additionally be installed to the home screen —
+over HTTPS. On iOS, the app must additionally be installed to the home screen.
 Safari does not deliver push to a normal tab.
 
 **Code changes to the service worker don't take effect.** A service worker with
@@ -467,8 +467,8 @@ ruff.toml         lint configuration, including FastAPI exemptions
 
 ## Files created
 
-- `backend/data/signal.db` — the SQLite database (plus its `-wal` and `-shm` sidecars).
-- `backend/.env` — local configuration, including the admin token.
+- `backend/data/signal.db`: the SQLite database (plus its `-wal` and `-shm` sidecars).
+- `backend/.env`: local configuration, including the admin token.
 
 Both are git-ignored.
 
