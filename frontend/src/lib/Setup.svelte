@@ -188,11 +188,21 @@
       </p>
 
     {:else if step === 'push'}
-      <h1>Send your first event</h1>
+      <h1>Token for {sourceName}</h1>
       <p>
-        Here is the token for <code>{sourceName}</code> — also shown only once.
-        Run this anywhere that can reach Gjallar:
+        Give this to the machine that will report. It is shown
+        <strong>once</strong> and cannot be recovered — if you lose it, revoke
+        the source and create another.
       </p>
+      <div class="secret">
+        <code>{sourceToken}</code>
+        <button onclick={() => copy(sourceToken, 'source')}>
+          {copied === 'source' ? 'Copied' : copied === 'source:failed' ? 'Select it' : 'Copy'}
+        </button>
+      </div>
+
+      <h2>Send your first event</h2>
+      <p>Run this anywhere that can reach Gjallar:</p>
       <div class="secret block">
         <pre><code>{curlExample}</code></pre>
         <button onclick={() => copy(curlExample, 'curl')}>
