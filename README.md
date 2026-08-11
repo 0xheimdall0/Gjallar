@@ -1,5 +1,7 @@
 # Gjallar — Heimdall's Signal Inbox
 
+[![CI](https://github.com/0xheimdall0/Gjallar/actions/workflows/ci.yml/badge.svg)](https://github.com/0xheimdall0/Gjallar/actions/workflows/ci.yml)
+
 A self-hosted inbox for machine signals. Any script, cron job or service sends a
 one-line HTTP request and the event lands in a searchable timeline on your phone
 and desktop. Built with **FastAPI** and **SQLite** on the back, an installable
@@ -348,7 +350,16 @@ and `unread`.
 ## Preview
 
 ### Timeline
-![Timeline](docs/screenshot.png)
+Severity as colour, sources in monospace, unread marked in gold, and the
+heartbeat panel above everything so silence is the first thing you see.
+
+![Timeline](docs/timeline.png)
+
+### Management and command builder
+Create and revoke sources, pause or delete heartbeats, and generate the exact
+line to paste into a script — for your server, your shell, your severity.
+
+![Management view](docs/manage.png)
 
 ### Notification on a phone, app closed
 ![Push notification](docs/notification.png)

@@ -1,0 +1,150 @@
+name: CI
+
+# Run on every push and every pull request. GitHub finds this file on its own;
+# nothing needs enabling beyond committing it.
+on:
+  push:
+  pull_request:
+
+jobs:
+  # ---------------------------------------------------------------- lint ---
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      # Reads ruff.toml at the repo root, including the FastAPI exemptions.
+      - name: Check
+        run: ruff check .
+
+  # ------------------------------------------------------------ frontend ---
+  frontend:
+    name: Build frontend
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # npm ci installs exactly what package-lock.json says, and fails if the
+      # lockfile and package.json disagree. npm install would quietly "fix" it.
+      - name: Install
+        run: npm ci
+        working-directory: frontend
+
+      - name: Build
+        run: npm run build
+        working-directory: frontend
+
+  # ----------------------------------------------------------- container ---
+  container:
+    name: Image builds and works
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t gjallar:ci .
+
+      - name: Start it
+        run: |
+          docker run -d --name gjallar \
+            -e SIGNAL_SETUP_ALLOW_REMOTE=true \
+            -e SIGNAL_DEBUG=false \
+            -p 8000:8000 \
+            gjallar:ci
+
+      # The container needs a moment to boot. Poll rather than sleeping a
+      # fixed time: faster when it's quick, and it fails loudly when it never
+      # comes up instead of racing the next step.
+      - name: Wait until healthy
+        run: |
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/api/health > /dev/null; then
+              echo "healthy"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "never became healthy"
+          docker logs gjallar
+          exit 1
+
+      # A container that starts is not the same as a container that works.
+      # This walks the whole path a real user takes on a fresh install.
+      - name: Exercise the API
+        run: |
+          set -euo pipefail
+          BASE=http://127.0.0.1:8000
+
+          echo "--- claim a fresh instance"
+          ADMIN=$(curl -fsS -X POST "$BASE/api/setup/claim" | jq -r .admin_token)
+          test -n "$ADMIN"
+
+          echo "--- claiming twice must fail"
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/setup/claim")
+          test "$code" = "409"
+
+          echo "--- create a source"
+          TOKEN=$(curl -fsS -X POST "$BASE/api/sources" \
+            -H "Authorization: Bearer $ADMIN" \
+            -H 'Content-Type: application/json' \
+            -d '{"name":"ci"}' | jq -r .token)
+          test -n "$TOKEN"
+
+          echo "--- file an event"
+          curl -fsS -X POST "$BASE/api/events" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H 'Content-Type: application/json' \
+            -d '{"title":"ci event","severity":"warn","tags":["ci"]}' > /dev/null
+
+          echo "--- a wrong token with a valid prefix must be rejected"
+          FORGED="${TOKEN:0:12}$(printf 'X%.0s' $(seq 1 35))"
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/events" \
+            -H "Authorization: Bearer $FORGED" \
+            -H 'Content-Type: application/json' \
+            -d '{"title":"forged"}')
+          test "$code" = "401"
+
+          echo "--- unauthenticated reads must be rejected"
+          code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/events")
+          test "$code" = "401"
+
+          echo "--- the event is readable, and exactly one exists"
+          count=$(curl -fsS "$BASE/api/events" -H "Authorization: Bearer $ADMIN" | jq '.events | length')
+          test "$count" -eq 1
+
+          echo "--- register a heartbeat"
+          curl -fsS -X POST "$BASE/api/heartbeats/ci-beat/ping" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H 'Content-Type: application/json' \
+            -d '{"expected_interval_seconds":60}' > /dev/null
+
+          state=$(curl -fsS "$BASE/api/heartbeats" -H "Authorization: Bearer $ADMIN" | jq -r '.[0].state')
+          test "$state" = "ok"
+
+          echo "--- docs must be off when SIGNAL_DEBUG is false"
+          code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/docs")
+          test "$code" = "404"
+
+          echo "all checks passed"
+
+      # Runs even when a step above failed — the logs are what you need then.
+      - name: Container logs
+        if: always()
+        run: docker logs gjallar
