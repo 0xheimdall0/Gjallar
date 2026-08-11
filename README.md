@@ -183,6 +183,111 @@ tailnet can reach it, and the app never listens on a public interface.
 Use `tailscale serve --https=443 off` to stop. Do **not** use `tailscale funnel`
 for this — that publishes to the open internet.
 
+## Reporting from your machines
+
+### The mental model
+
+There are **two kinds of credential**, and mixing them up is the usual first
+stumble:
+
+| | Who holds it | What it can do |
+|---|---|---|
+| **Source token** (`sig_…`) | machines and scripts | file events, ping heartbeats |
+| **Admin token** | the web interface | read the timeline, manage sources |
+
+One source token per machine, so any of them can be revoked alone. Create them
+in the setup wizard, or with `python manage.py create-source <name>`. Each is
+shown **once**.
+
+There are **two things a script can send**:
+
+- An **event** — "this happened". Appears in the timeline, may notify you.
+- A **ping** — "I'm still alive". Doesn't appear in the timeline; its *absence*
+  is what raises an alert.
+
+Most scheduled jobs should send both: an event describing what happened, and a
+ping so silence is noticed if the job stops running entirely.
+
+**Heartbeats register themselves.** The first ping must carry
+`expected_interval_seconds`, and that call creates the heartbeat. Later pings
+can send an empty body — or supply the interval again to change it. There is no
+separate "create heartbeat" step.
+
+### The easy way
+
+`scripts/` contains a small client for each platform so you don't have to hand-
+write `curl`.
+
+**Linux and macOS** — set two variables once, in `~/.profile`:
+
+```bash
+export GJALLAR_URL=https://gjallar.example.com
+export GJALLAR_TOKEN=sig_your_source_token
+```
+
+then from any script:
+
+```bash
+gjallar.sh event "Backup finished" -m "412 GB in 3m21s" -s info -t backup
+gjallar.sh ping nightly-backup --every 86400 --grace 3600
+```
+
+**Windows** — set the same two variables once:
+
+```powershell
+[Environment]::SetEnvironmentVariable('GJALLAR_URL',   'https://gjallar.example.com', 'User')
+[Environment]::SetEnvironmentVariable('GJALLAR_TOKEN', 'sig_your_source_token',       'User')
+```
+
+then in any script:
+
+```powershell
+Import-Module "$HOME\Gjallar\scripts\Gjallar.psm1"
+
+Send-GjallarEvent -Title "Backup finished" -Message "412 GB" -Severity info -Tags backup
+Send-GjallarPing  -Name nightly-backup -Every 86400 -Grace 3600
+```
+
+Neither client throws. If Gjallar is unreachable they warn and carry on, so
+reporting can never break the job doing the reporting — the missing ping is what
+tells you something went wrong.
+
+### A complete example
+
+A nightly backup that reports its result and is watched for silence:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+if restic backup /home > /tmp/backup.log 2>&1; then
+    gjallar.sh event "Backup finished" -s info -t backup -m "$(tail -3 /tmp/backup.log)"
+else
+    gjallar.sh event "Backup FAILED" -s error -t backup -m "$(tail -20 /tmp/backup.log)"
+fi
+
+# 26 hours, so a job that runs a little late isn't an outage.
+gjallar.sh ping nightly-backup --every 93600 --grace 3600
+```
+
+The ping is outside the `if` on purpose: it means "this script ran", not "the
+backup worked". Those are different facts, and you want to know about both
+independently.
+
+### Without any client
+
+Everything is plain HTTP, so `curl` works from anywhere:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+     -d '{"title":"Disk almost full","severity":"warn","tags":["disk"]}' \
+     https://gjallar.example.com/api/events
+
+curl -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+     -d '{"expected_interval_seconds":3600}' \
+     https://gjallar.example.com/api/heartbeats/hourly-sync/ping
+```
+
 ## API
 
 | Method | Path | Auth | Purpose |

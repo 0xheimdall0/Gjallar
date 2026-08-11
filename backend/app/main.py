@@ -18,6 +18,7 @@ from .config import settings
 from .db import get_db, init_db, utc_now
 from .heartbeats import check_heartbeats, record_heartbeat_event
 from .models import (
+    EventIdList,
     EventIn,
     EventOut,
     EventPage,
@@ -367,6 +368,7 @@ def list_heartbeats(
 
     return [
         HeartbeatOut(
+            id=r["id"],
             name=r["name"],
             source=r["source_name"],
             state=r["state"],
@@ -451,17 +453,95 @@ def setup_claim(request: Request) -> dict:
     logger.warning("Gjallar claimed from %s. Admin token generated.", client)
     return {"admin_token": admin}
 
+@app.post("/api/events/delete")
+def delete_events(
+    payload: EventIdList,
+    _: None = Depends(require_admin),
+    db: sqlite3.Connection = Depends(get_db),
+) -> dict:
+    """Delete many events at once.
+
+    POST rather than DELETE: a request body on DELETE is legal but unevenly
+    supported by proxies and HTTP clients.
+    """
+    # The f-string interpolates only "?,?,?" — placeholders, never values.
+    placeholders = ",".join("?" * len(payload.ids))
+    cursor = db.execute(
+        f"DELETE FROM events WHERE id IN ({placeholders})",  # noqa: S608
+        payload.ids,
+    )
+    db.commit()
+
+    logger.info("bulk deleted %s events", cursor.rowcount)
+    return {"deleted": cursor.rowcount}
+
+
+@app.delete("/api/events/{event_id}", status_code=204)
+def delete_event(
+    event_id: int,
+    _: None = Depends(require_admin),
+    db: sqlite3.Connection = Depends(get_db),
+) -> None:
+    cursor = db.execute("DELETE FROM events WHERE id = ?", (event_id,))
+    db.commit()
+
+    if cursor.rowcount == 0:
+        raise HTTPException(404, "No such event")
+
+
+@app.delete("/api/heartbeats/{heartbeat_id}", status_code=204)
+def delete_heartbeat(
+    heartbeat_id: int,
+    _: None = Depends(require_admin),
+    db: sqlite3.Connection = Depends(get_db),
+) -> None:
+    """Stop watching this heartbeat. It reappears if the source pings again."""
+    cursor = db.execute("DELETE FROM heartbeats WHERE id = ?", (heartbeat_id,))
+    db.commit()
+
+    if cursor.rowcount == 0:
+        raise HTTPException(404, "No such heartbeat")
+
+    logger.info("heartbeat %s deleted", heartbeat_id)
+
+
+@app.post("/api/heartbeats/{heartbeat_id}/pause", status_code=204)
+def pause_heartbeat(
+    heartbeat_id: int,
+    paused: bool = True,
+    _: None = Depends(require_admin),
+    db: sqlite3.Connection = Depends(get_db),
+) -> None:
+    """Suspend silence checking — for a machine that is off on purpose.
+
+    Clearing alerted_at means resuming starts from a clean slate rather than
+    staying quiet because it alerted before being paused.
+    """
+    cursor = db.execute(
+        "UPDATE heartbeats SET paused = ?, alerted_at = NULL WHERE id = ?",
+        (1 if paused else 0, heartbeat_id),
+    )
+    db.commit()
+
+    if cursor.rowcount == 0:
+        raise HTTPException(404, "No such heartbeat")
+
+    logger.info("heartbeat %s %s", heartbeat_id, "paused" if paused else "resumed")
+
+
 @app.get("/api/sources", response_model=list[SourceOut])
 def list_sources(
     _: None = Depends(require_admin),
     db: sqlite3.Connection = Depends(get_db),
 ) -> list[SourceOut]:
     rows = db.execute(
-        "SELECT name, description, created_at, last_seen_at, revoked_at, FROM sources ORDER BY name"
+        "SELECT id, name, description, created_at, last_seen_at, revoked_at"
+        " FROM sources ORDER BY name"
     ).fetchall()
 
     return [
         SourceOut(
+            id=r["id"],
             name=r["name"],
             description=r["description"],
             created_at=r["created_at"],
@@ -470,6 +550,45 @@ def list_sources(
         )
         for r in rows
     ]
+
+@app.post("/api/sources/{source_id}/revoke", status_code=204)
+def revoke_source(
+    source_id: int,
+    _: None = Depends(require_admin),
+    db: sqlite3.Connection = Depends(get_db),
+) -> None:
+    """Disable a source's token but keep everything it has already sent."""
+    cursor = db.execute(
+        "UPDATE sources SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
+        (utc_now(), source_id),
+    )
+    db.commit()
+
+    if cursor.rowcount == 0:
+        raise HTTPException(404, "No such active source")
+
+    logger.warning("source %s revoked", source_id)
+
+
+@app.delete("/api/sources/{source_id}", status_code=204)
+def delete_source(
+    source_id: int,
+    _: None = Depends(require_admin),
+    db: sqlite3.Connection = Depends(get_db),
+) -> None:
+    """Delete a source *and everything it ever sent*.
+
+    events.source_id and heartbeats.source_id are declared ON DELETE CASCADE,
+    so this removes the whole history too. Revoking is usually what you want.
+    """
+    cursor = db.execute("DELETE FROM sources WHERE id = ?", (source_id,))
+    db.commit()
+
+    if cursor.rowcount == 0:
+        raise HTTPException(404, "No such source")
+
+    logger.warning("source %s deleted, with all its events and heartbeats", source_id)
+
 
 @app.post("/api/sources", response_model=SourceCreated, status_code=201)
 def create_source(

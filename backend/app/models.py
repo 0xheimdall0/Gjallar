@@ -30,6 +30,16 @@ class EventRead(BaseModel):
     received_at: str 
     read_at: str | None
 
+class EventIdList(BaseModel):
+    """Body for bulk deletion."""
+
+    model_config = {"extra": "forbid"}
+
+    # Capped so a single request can't try to delete the entire table, and
+    # typed as int so anything else is rejected before it reaches SQL.
+    ids: list[int] = Field(min_length=1, max_length=500)
+
+
 class EventPage(BaseModel):
     events: list[EventRead]
     next_before: int | None
@@ -50,6 +60,7 @@ class HeartbeatPing(BaseModel):
     grace_seconds: int | None = Field(default=None, ge=0, le=86_400)
 
 class HeartbeatOut(BaseModel):
+    id: int
     name: str
     source: str
     state: str
@@ -76,8 +87,10 @@ class SourceCreated(BaseModel):
     token: str
 
 class SourceOut(BaseModel):
+    id: int
     name: str
     description: str | None
     created_at: str
     last_seen_at: str | None
     revoked: bool
+

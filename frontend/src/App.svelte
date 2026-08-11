@@ -8,8 +8,11 @@
     setEventRead,
     markAllRead,
     fetchSetupStatus,
+    deleteEvent,
+    deleteEvents,
   } from './lib/api.js'
   import Setup from './lib/Setup.svelte'
+  import Manage from './lib/Manage.svelte'
   import { enablePush, pushSupported } from './lib/push.js'
   import EventCard from './lib/EventCard.svelte'
   import HeartbeatPanel from './lib/HeartbeatPanel.svelte'
@@ -46,6 +49,11 @@
   let booting = $state(true)
   let needsSetup = $state(false)
   let serverConfigured = $state(true)
+  let showManage = $state(false)
+
+  let selectMode = $state(false)
+  /** @type {number[]} */
+  let selectedIds = $state([])
 
   let unreadCount = $state(0)
 
@@ -71,6 +79,44 @@
       // Put it back if the server disagreed.
       event.read_at = previous
       unreadCount += nowRead ? 1 : -1
+      error = e instanceof Error ? e.message : String(e)
+    }
+  }
+
+  /** @param {SignalEvent} event */
+  function toggleSelect(event) {
+    selectedIds = selectedIds.includes(event.id)
+      ? selectedIds.filter((id) => id !== event.id)
+      : [...selectedIds, event.id]
+  }
+
+  function leaveSelectMode() {
+    selectMode = false
+    selectedIds = []
+  }
+
+  async function deleteSelected() {
+    const count = selectedIds.length
+    if (count === 0) return
+    if (!confirm(`Delete ${count} event${count === 1 ? '' : 's'}? This cannot be undone.`)) return
+
+    try {
+      await deleteEvents(selectedIds)
+      leaveSelectMode()
+      await load()
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e)
+    }
+  }
+
+  /** @param {SignalEvent} event */
+  async function removeEvent(event) {
+    if (!confirm(`Delete "${event.title}"?`)) return
+    try {
+      await deleteEvent(event.id)
+      events = events.filter((e) => e.id !== event.id)
+      if (event.read_at === null) unreadCount -= 1
+    } catch (e) {
       error = e instanceof Error ? e.message : String(e)
     }
   }
@@ -192,6 +238,25 @@
       {loading ? 'Loading…' : 'Refresh'}
     </button>
 
+    {#if selectMode}
+      <button onclick={() => (selectedIds = events.map((e) => e.id))}>Select all</button>
+      <button
+        class="danger"
+        onclick={deleteSelected}
+        disabled={selectedIds.length === 0}
+      >
+        Delete {selectedIds.length || ''}
+      </button>
+      <button onclick={leaveSelectMode}>Cancel</button>
+    {:else}
+      <button onclick={() => (selectMode = true)} title="Select events to delete">
+        Select
+      </button>
+      <button onclick={() => (showManage = true)} title="Sources, heartbeats, snippets">
+        Manage
+      </button>
+    {/if}
+
     <button
       class="icon"
       onclick={() => (showSettings = !showSettings)}
@@ -231,6 +296,10 @@
     <p class="error">{error}</p>
   {/if}
 
+  {#if showManage}
+    <Manage onClose={() => { showManage = false; load() }} />
+  {:else}
+
   <HeartbeatPanel {heartbeats} />
 
   {#if events.length === 0 && !loading && !error}
@@ -245,13 +314,22 @@
   {/if}
 
   {#each events as event (event.id)}
-    <EventCard {event} onToggleRead={toggleRead} />
+    <EventCard
+      {event}
+      onToggleRead={toggleRead}
+      onDelete={removeEvent}
+      selectable={selectMode}
+      selected={selectedIds.includes(event.id)}
+      onToggleSelect={toggleSelect}
+    />
   {/each}
 
   {#if nextBefore}
     <button class="more" onclick={() => load({ append: true })} disabled={loading}>
       Load more
     </button>
+  {/if}
+
   {/if}
 </main>
 {/if}
@@ -316,6 +394,12 @@
     padding: 0.45rem 0.6rem;
     line-height: 1;
     color: var(--text-muted);
+  }
+
+  .danger:hover:not(:disabled) {
+    color: var(--sev-error);
+    border-color: rgba(217, 83, 79, 0.5);
+    background: rgba(217, 83, 79, 0.1);
   }
 
   .settings {
