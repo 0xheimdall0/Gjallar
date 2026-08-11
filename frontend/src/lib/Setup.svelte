@@ -1,6 +1,7 @@
 <script>
   import { claimSetup, createSource, setToken, getToken } from './api.js'
   import { enablePush, pushSupported } from './push.js'
+  import { copyText } from './clipboard.js'
 
   /** @type {{ configured: boolean, onDone: () => void }} */
   let { configured, onDone } = $props()
@@ -20,13 +21,17 @@
   let pushMessage = $state('')
   let canPush = pushSupported()
 
-  /** @param {string} text */
-  async function copy(text) {
-    try {
-      await navigator.clipboard.writeText(text)
-    } catch {
-      /* Clipboard needs a secure context; the value is on screen regardless. */
-    }
+  /** Which button was last used, so it can report what happened. */
+  let copied = $state('')
+
+  /**
+   * @param {string} text
+   * @param {string} label
+   */
+  async function copy(text, label) {
+    const ok = await copyText(text)
+    copied = ok ? label : `${label}:failed`
+    setTimeout(() => (copied = ''), 2000)
   }
 
   async function claim() {
@@ -152,8 +157,15 @@
       </p>
       <div class="secret">
         <code>{adminToken}</code>
-        <button onclick={() => copy(adminToken)}>Copy</button>
+        <button onclick={() => copy(adminToken, 'token')}>
+          {copied === 'token' ? 'Copied' : copied === 'token:failed' ? 'Select it' : 'Copy'}
+        </button>
       </div>
+      <p class="note">
+        It is also written to <code>backend/.env</code> as
+        <code>SIGNAL_ADMIN_TOKEN</code>, so it can be recovered from the server
+        if you lose it.
+      </p>
 
       <h2>Name your first source</h2>
       <p>
@@ -183,7 +195,9 @@
       </p>
       <div class="secret block">
         <pre><code>{curlExample}</code></pre>
-        <button onclick={() => copy(curlExample)}>Copy</button>
+        <button onclick={() => copy(curlExample, 'curl')}>
+          {copied === 'curl' ? 'Copied' : copied === 'curl:failed' ? 'Select it' : 'Copy'}
+        </button>
       </div>
 
       {#if canPush}

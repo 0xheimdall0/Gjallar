@@ -9,6 +9,7 @@
     pauseHeartbeat,
     deleteHeartbeat,
   } from './api.js'
+  import { copyText } from './clipboard.js'
 
   /** @type {{ onClose: () => void }} */
   let { onClose } = $props()
@@ -129,15 +130,14 @@
     }
   }
 
-  /** @param {string} text */
+  /**
+   * @param {string} text
+   * @param {string} label
+   */
   async function copy(text, label = '') {
-    try {
-      await navigator.clipboard.writeText(text)
-      copied = label
-      setTimeout(() => (copied = ''), 1500)
-    } catch {
-      /* clipboard needs a secure context */
-    }
+    const ok = await copyText(text)
+    copied = ok ? label : `${label}:failed`
+    setTimeout(() => (copied = ''), 2000)
   }
 
   // The token is only ever knowable at creation time, so snippets use the
@@ -229,7 +229,7 @@
       <div class="secret">
         <code>{freshToken}</code>
         <button onclick={() => copy(freshToken, 'token')}>
-          {copied === 'token' ? 'Copied' : 'Copy'}
+          {copied === 'token' ? 'Copied' : copied === 'token:failed' ? 'Select it' : 'Copy'}
         </button>
       </div>
     </div>
@@ -364,7 +364,7 @@
   <div class="snippet">
     <pre><code>{snippet}</code></pre>
     <button onclick={() => copy(snippet, 'snippet')}>
-      {copied === 'snippet' ? 'Copied' : 'Copy'}
+      {copied === 'snippet' ? 'Copied' : copied === 'snippet:failed' ? 'Select it' : 'Copy'}
     </button>
   </div>
 </div>
