@@ -14,6 +14,10 @@ services:
       SIGNAL_DATABASE_PATH: /data/signal.db
       SIGNAL_FRONTEND_DIR: /app/frontend_dist
       SIGNAL_DEBUG: "false"
+      # Secrets written by the setup wizard live on the volume, not in the
+      # container filesystem — otherwise rebuilding the image loses the admin
+      # token and the VAPID keys, and every device has to re-subscribe.
+      SIGNAL_ENV_FILE: /data/.env
 
     volumes:
       - gjallar-data:/data

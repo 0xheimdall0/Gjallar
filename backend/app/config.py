@@ -6,7 +6,13 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-ENV_PATH= BASE_DIR / ".env"
+
+# Where secrets written at runtime by the setup wizard are stored.
+# Overridable because in a container the default sits on the image filesystem,
+# which is destroyed whenever the container is recreated — taking the admin
+# token and the VAPID keys with it. Compose points this at the data volume.
+ENV_PATH = Path(os.environ.get("SIGNAL_ENV_FILE") or (BASE_DIR / ".env"))
+
 _overrides: dict[str, str] = {}
 
 load_dotenv(ENV_PATH)
