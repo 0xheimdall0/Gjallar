@@ -28,21 +28,22 @@ Named after Gjallarhorn — the horn Heimdall sounds when something is coming.
 
 ---
 
-## Status
+## What's built
 
-| Done | In progress / planned |
-|---|---|
-| Database schema — sources, events, heartbeats, subscriptions | Automated test suite (`pytest`) |
-| Source token authentication (Argon2, prefix lookup, revocation) | Full-text search via SQLite FTS5 |
-| Event ingest endpoint with schema validation | Structured logging |
-| Read API — filters, tag search, search, cursor pagination | |
-| Svelte timeline UI, read/unread tracking, bulk delete | |
-| Installable PWA with Web Push notifications | |
-| Heartbeats — ping endpoint, silence checker, alerting | |
-| Security hardening pass (see security notes) | |
-| First-run setup wizard | |
-| Management view with command builder | |
-| Docker image, built and smoke-tested in CI | |
+- Four-table SQLite schema with constraints, cascades and partial indexes
+- Source token authentication — Argon2 hashes, prefix lookup, revocation
+- Event ingest with schema validation, rate limiting and a payload cap
+- Read API with filters, tag and text search, and cursor pagination
+- Svelte timeline UI: read/unread tracking, selection, bulk delete
+- Installable PWA with Web Push, and per-device severity thresholds
+- Heartbeats — ping endpoint, silence checker, one alert per outage
+- First-run setup wizard and a management view with a command builder
+- Security hardening pass, documented in [docs/security-notes.md](docs/security-notes.md)
+- Docker image, built and smoke-tested in CI on every push
+
+Known limitations are listed in the
+[security notes](docs/security-notes.md#open-weaknesses) rather than glossed
+over.
 
 ## Features
 
